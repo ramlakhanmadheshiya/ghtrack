@@ -64,11 +64,25 @@ const server = http.createServer((req, res) => {
           headers,
         },
         (proxyRes) => {
-          res.writeHead(proxyRes.statusCode, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+          let resBody = "";
+          proxyRes.on("data", (chunk) => (resBody += chunk));
+          proxyRes.on("end", () => {
+            const isJson = (proxyRes.headers["content-type"] || "").includes("json");
+            res.writeHead(proxyRes.statusCode, {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            });
+            if (isJson) {
+              res.end(resBody);
+            } else {
+              res.end(
+                JSON.stringify({
+                  error: `GitHub API returned HTTP ${proxyRes.statusCode}`,
+                  details: resBody.slice(0, 300),
+                })
+              );
+            }
           });
-          proxyRes.pipe(res);
         }
       );
 
