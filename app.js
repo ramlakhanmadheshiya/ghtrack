@@ -225,38 +225,45 @@
     ${ROW_FRAGMENT}
   `;
 
-  // ── GitHub API Fetcher (Dual Engine: GraphQL + REST Fallback) ───────
+  // ── GitHub API Fetcher (Dual Engine: GraphQL Proxy + REST Fallback) ─
   async function fetchGraphQL(query, variables) {
-    if (!state.token) {
-      throw new Error("NO_TOKEN");
+    // 1. Try server proxy endpoint first (automatic 5,000 req/hr token)
+    try {
+      const proxyRes = await fetch("/api/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+      });
+      if (proxyRes.ok) {
+        const proxyData = await proxyRes.json();
+        if (proxyData.data) return proxyData.data;
+      }
+    } catch {
+      // Local proxy not reached, proceed to direct client
     }
 
-    const headers = {
-      "Content-Type": "application/json",
-      "User-Agent": "ghtrack-web/1.0",
-      "Authorization": `Bearer ${state.token}`,
-    };
+    // 2. Direct client token if saved in localStorage
+    if (state.token) {
+      const headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "ghtrack-web/1.0",
+        Authorization: `Bearer ${state.token}`,
+      };
 
-    const res = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ query, variables }),
-    });
+      const res = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query, variables }),
+      });
 
-    const data = await res.json().catch(() => null);
+      const data = await res.json().catch(() => null);
 
-    if (!res.ok || data?.errors) {
-      const msg = data?.errors?.[0]?.message || `GitHub API error: ${res.status}`;
-      if (res.status === 401) {
-        throw new Error("Invalid GitHub token. Please verify or update your token in settings.");
+      if (res.ok && data?.data) {
+        return data.data;
       }
-      if (res.status === 403 || msg.includes("rate limit")) {
-        throw new Error("GitHub API rate limit exceeded. Please enter a Personal Access Token (PAT) for 5,000 requests/hour.");
-      }
-      throw new Error(msg);
     }
 
-    return data.data;
+    throw new Error("GRAPHQL_UNAVAILABLE");
   }
 
   // REST search fallback for unauthenticated public browsing (zero token needed)
@@ -466,17 +473,35 @@
   }
 
   // ── Fetch & Background Stream Engine ────────────────────────────────
+  let activeSearchId = 0;
+
   async function startTracking(username) {
     const cleanUser = username.trim().replace(/^@/, "");
     if (!cleanUser) return;
 
+    // Isolate this specific search session
+    const searchId = ++activeSearchId;
+
     state.login = cleanUser;
     state.currentPage = 1;
-    state.itemsMap.clear();
-    state.cancelStreaming = true; // cancel any ongoing stream
+    state.itemsMap.clear(); // WIPE master store immediately!
+    state.cancelStreaming = true; // Signals previous background loop to exit immediately
 
     dom.searchInput.value = cleanUser;
     history.replaceState(null, "", `?name=${encodeURIComponent(cleanUser)}`);
+
+    // Reset all UI elements immediately to guarantee no previous user data remains
+    dom.listContainer.innerHTML = "";
+    dom.pageButtons.innerHTML = "";
+    dom.filterRepo.innerHTML = `<option value="all">All Repositories</option>`;
+    dom.statTotal.textContent = "0";
+    dom.statPrs.textContent = "0";
+    dom.statPrsSub.textContent = "0% merged";
+    dom.statIssues.textContent = "0";
+    dom.statIssuesSub.textContent = "0 open · 0 closed";
+    dom.statComments.textContent = "0";
+    dom.statRepos.textContent = "0";
+    dom.pagerCount.textContent = "0 of 0";
 
     // UI Loading state
     dom.btnSearch.disabled = true;
@@ -484,15 +509,15 @@
     dom.mainContent.style.display = "block";
     dom.listLoading.style.display = "flex";
     dom.listEmpty.style.display = "none";
-    dom.listContainer.innerHTML = "";
     dom.telemetryBar.style.display = "grid";
     dom.streamBanner.style.display = "flex";
-    dom.streamText.textContent = `Fetching first ${PAGE_SIZE} items for @${cleanUser}...`;
+    dom.streamText.textContent = `Fetching lifetime history for @${cleanUser}...`;
     dom.streamProgressFill.style.width = "5%";
 
-    // Check IndexedDB cache first for instant display
+    // Check IndexedDB cache ONLY for this exact user
     const cached = await getCachedProfile(cleanUser);
-    if (cached && cached.items?.length) {
+    if (searchId !== activeSearchId) return;
+    if (cached && cached.items?.length && cached.login === cleanUser.toLowerCase()) {
       cached.items.forEach((item) => state.itemsMap.set(item.id, item));
       updateTelemetry();
       populateRepoFilter();
@@ -500,53 +525,59 @@
     }
 
     try {
-      // Step 1: Initial Fast Fetch (Page 1: 50 items)
-      if (state.token) {
-        // High-speed authenticated GraphQL mode
-        const data = await fetchGraphQL(SEARCH_QUERY, {
-          main: `involves:${cleanUser} sort:updated-desc`,
-          extra: `commenter:${cleanUser} sort:updated-desc`,
-          n: PAGE_SIZE,
-          cursorMain: null,
-          cursorExtra: null,
-        });
+      // 1. Try High-Speed GraphQL (100 items per request, 5,000 req/hr enabled)
+      const data = await fetchGraphQL(SEARCH_QUERY, {
+        main: `involves:${cleanUser} sort:updated-desc`,
+        extra: `commenter:${cleanUser} sort:updated-desc`,
+        n: 100,
+        cursorMain: null,
+        cursorExtra: null,
+      });
 
-        const totalEstimated = Math.max(data.main?.issueCount || 0, data.extra?.issueCount || 0);
-        state.totalEstimated = totalEstimated;
+      if (searchId !== activeSearchId) return;
 
-        for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
-          const item = normalizeNode(node, cleanUser);
-          if (item) state.itemsMap.set(item.id, item);
-        }
+      const totalEstimated = Math.max(data.main?.issueCount || 0, data.extra?.issueCount || 0);
+      state.totalEstimated = totalEstimated;
 
-        dom.listLoading.style.display = "none";
-        updateTelemetry();
-        populateRepoFilter();
-        renderList();
+      for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
+        const item = normalizeNode(node, cleanUser);
+        if (item) state.itemsMap.set(item.id, item);
+      }
 
-        const hasMore = Boolean(data.main?.pageInfo?.hasNextPage || data.extra?.pageInfo?.hasNextPage);
-        if (hasMore) {
-          state.cancelStreaming = false;
-          streamRemainingBatches(
-            cleanUser,
-            data.main?.pageInfo?.endCursor,
-            data.extra?.pageInfo?.endCursor,
-            Boolean(data.main?.pageInfo?.hasNextPage),
-            Boolean(data.extra?.pageInfo?.hasNextPage),
-            totalEstimated
-          );
-        } else {
-          dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
-          dom.streamProgressFill.style.width = "100%";
-          saveCachedProfile(cleanUser, { items: Array.from(state.itemsMap.values()) });
-        }
+      dom.listLoading.style.display = "none";
+      updateTelemetry();
+      populateRepoFilter();
+      renderList();
+
+      const hasMore = Boolean(data.main?.pageInfo?.hasNextPage || data.extra?.pageInfo?.hasNextPage);
+      if (hasMore) {
+        state.cancelStreaming = false;
+        streamRemainingBatches(
+          cleanUser,
+          searchId,
+          data.main?.pageInfo?.endCursor,
+          data.extra?.pageInfo?.endCursor,
+          Boolean(data.main?.pageInfo?.hasNextPage),
+          Boolean(data.extra?.pageInfo?.hasNextPage),
+          totalEstimated
+        );
       } else {
-        // Public zero-token REST search mode
-        const data = await fetchRestSearch(cleanUser, 1);
-        const totalEstimated = data.total_count || 0;
+        dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
+        dom.streamProgressFill.style.width = "100%";
+        saveCachedProfile(cleanUser, { login: cleanUser.toLowerCase(), items: Array.from(state.itemsMap.values()) });
+      }
+    } catch {
+      if (searchId !== activeSearchId) return;
+
+      // Fallback: If GraphQL failed, try REST Search
+      try {
+        const restData = await fetchRestSearch(cleanUser, 1);
+        if (searchId !== activeSearchId) return;
+
+        const totalEstimated = restData.total_count || 0;
         state.totalEstimated = totalEstimated;
 
-        for (const raw of data.items || []) {
+        for (const raw of restData.items || []) {
           const item = normalizeRestNode(raw, cleanUser);
           if (item) state.itemsMap.set(item.id, item);
         }
@@ -559,49 +590,54 @@
         const totalPages = Math.ceil(totalEstimated / PAGE_SIZE);
         if (totalPages > 1) {
           state.cancelStreaming = false;
-          streamRestPages(cleanUser, totalPages, totalEstimated);
+          streamRestPages(cleanUser, searchId, totalPages, totalEstimated);
         } else {
           dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
           dom.streamProgressFill.style.width = "100%";
-          saveCachedProfile(cleanUser, { items: Array.from(state.itemsMap.values()) });
+          saveCachedProfile(cleanUser, { login: cleanUser.toLowerCase(), items: Array.from(state.itemsMap.values()) });
+        }
+      } catch (restErr) {
+        if (searchId !== activeSearchId) return;
+        dom.listLoading.style.display = "none";
+        dom.streamText.textContent = `Error: ${restErr.message}`;
+        if (!state.itemsMap.size) {
+          dom.listEmpty.style.display = "block";
+          dom.listEmpty.querySelector("p").textContent = restErr.message;
         }
       }
-    } catch (err) {
-      dom.listLoading.style.display = "none";
-      dom.streamText.textContent = `Error: ${err.message}`;
-      if (!state.itemsMap.size) {
-        dom.listEmpty.style.display = "block";
-        dom.listEmpty.querySelector("p").textContent = err.message;
-      }
     } finally {
-      dom.btnSearch.disabled = false;
-      dom.btnSearch.textContent = "Track";
+      if (searchId === activeSearchId) {
+        dom.btnSearch.disabled = false;
+        dom.btnSearch.textContent = "Track";
+      }
     }
   }
 
-  // Background stream processor: fetches in 50-item batches until done
-  async function streamRemainingBatches(login, cursorMain, cursorExtra, hasMain, hasExtra, totalEst) {
+  // Background stream processor: fetches in 100-item batches until done
+  async function streamRemainingBatches(login, searchId, cursorMain, cursorExtra, hasMain, hasExtra, totalEst) {
     state.isStreamingBackground = true;
     let cMain = cursorMain;
     let cExtra = cursorExtra;
     let moreMain = hasMain;
     let moreExtra = hasExtra;
 
-    while ((moreMain || moreExtra) && !state.cancelStreaming) {
+    while ((moreMain || moreExtra) && !state.cancelStreaming && searchId === activeSearchId) {
       const currentCount = state.itemsMap.size;
-      const progressPercent = totalEst > 0 ? Math.min(95, Math.round((currentCount / totalEst) * 100)) : 50;
+      const progressPercent = totalEst > 0 ? Math.min(98, Math.round((currentCount / totalEst) * 100)) : 50;
 
-      dom.streamText.textContent = `⚡ Buffering background history: ${currentCount} loaded (${progressPercent}%)...`;
+      dom.streamText.textContent = `⚡ Buffering lifetime history: ${currentCount} loaded (${progressPercent}%)...`;
       dom.streamProgressFill.style.width = `${progressPercent}%`;
 
       try {
         const data = await fetchGraphQL(SEARCH_QUERY, {
           main: `involves:${login} sort:updated-desc`,
           extra: `commenter:${login} sort:updated-desc`,
-          n: PAGE_SIZE,
+          n: 100,
           cursorMain: moreMain ? cMain : null,
           cursorExtra: moreExtra ? cExtra : null,
         });
+
+        if (searchId !== activeSearchId) return;
 
         for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
           const item = normalizeNode(node, login);
@@ -613,41 +649,43 @@
         cMain = data.main?.pageInfo?.endCursor || null;
         cExtra = data.extra?.pageInfo?.endCursor || null;
 
-        // Keep updating counts and filters live without disrupting the user's scroll position
         updateTelemetry();
         populateRepoFilter();
         updatePagerUI();
 
-        // Brief delay between batches to respect rate limits
-        await new Promise((r) => setTimeout(r, 200));
+        // Brief delay between batches
+        await new Promise((r) => setTimeout(r, 120));
       } catch (err) {
         console.warn("Background stream pause/error:", err.message);
         break;
       }
     }
 
+    if (searchId !== activeSearchId) return;
+
     state.isStreamingBackground = false;
     dom.streamText.textContent = `✓ 100% lifetime history loaded (${state.itemsMap.size} items buffered in memory & IndexedDB)`;
     dom.streamProgressFill.style.width = "100%";
 
-    // Save full dataset into IndexedDB for instant retrieval on next visit
-    saveCachedProfile(login, { items: Array.from(state.itemsMap.values()) });
+    saveCachedProfile(login, { login: login.toLowerCase(), items: Array.from(state.itemsMap.values()) });
     updatePagerUI();
   }
 
   // Background stream processor for public REST mode
-  async function streamRestPages(login, totalPages, totalEst) {
+  async function streamRestPages(login, searchId, totalPages, totalEst) {
     state.isStreamingBackground = true;
 
-    for (let page = 2; page <= totalPages && !state.cancelStreaming; page++) {
+    for (let page = 2; page <= totalPages && !state.cancelStreaming && searchId === activeSearchId; page++) {
       const currentCount = state.itemsMap.size;
-      const progressPercent = totalEst > 0 ? Math.min(95, Math.round((currentCount / totalEst) * 100)) : 50;
+      const progressPercent = totalEst > 0 ? Math.min(98, Math.round((currentCount / totalEst) * 100)) : 50;
 
       dom.streamText.textContent = `⚡ Buffering background history: ${currentCount} loaded (${progressPercent}%)...`;
       dom.streamProgressFill.style.width = `${progressPercent}%`;
 
       try {
         const data = await fetchRestSearch(login, page);
+        if (searchId !== activeSearchId) return;
+
         for (const raw of data.items || []) {
           const item = normalizeRestNode(raw, login);
           if (item) state.itemsMap.set(item.id, item);
@@ -657,18 +695,19 @@
         populateRepoFilter();
         updatePagerUI();
 
-        // 350ms delay between REST pages to respect unauthenticated limits
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, 300));
       } catch (err) {
         console.warn("Background REST stream paused:", err.message);
         break;
       }
     }
 
+    if (searchId !== activeSearchId) return;
+
     state.isStreamingBackground = false;
     dom.streamText.textContent = `✓ 100% lifetime history loaded (${state.itemsMap.size} items buffered in memory & IndexedDB)`;
     dom.streamProgressFill.style.width = "100%";
-    saveCachedProfile(login, { items: Array.from(state.itemsMap.values()) });
+    saveCachedProfile(login, { login: login.toLowerCase(), items: Array.from(state.itemsMap.values()) });
     updatePagerUI();
   }
 
@@ -916,74 +955,56 @@
         </div>
       </div>
 
-      <!-- Native GitHub Preview Drawer -->
+      <!-- Native Real GitHub Page Embedder Drawer -->
       <div class="preview-drawer ${isExpanded ? "open" : ""}">
         <div class="drawer-header">
-          <div class="drawer-branches">
-            ${
-              item.kind === "pr" && item.baseRef
-                ? `<span class="branch-pill">${escapeHtml(item.baseRef)}</span> ← <span class="branch-pill">${escapeHtml(item.headRef)}</span>`
-                : `<span class="branch-pill">Issue #${item.number}</span>`
-            }
-            ${
-              item.kind === "pr" && (item.additions || item.deletions)
-                ? `<div class="diff-stats">
-                     <span class="diff-add">+${item.additions}</span>
-                     <span class="diff-del">-${item.deletions}</span>
-                     <span>${item.changedFiles} files</span>
-                   </div>`
-                : ""
-            }
+          <div class="preview-meta">
+            <span class="preview-badge">Live GitHub</span>
+            <span class="preview-url">${escapeHtml(item.repo)}#${item.number}</span>
           </div>
 
           <div class="drawer-actions">
             <a href="${item.url}" target="_blank" rel="noopener" class="btn-external">
-              <span>Open on GitHub</span>
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <span>Open in new tab</span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path fill-rule="evenodd" d="M10.604 1h4.146a.25.25 0 01.25.25v4.146a.25.25 0 01-.427.177L13.03 4.03 9.28 7.78a.75.75 0 01-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0110.604 1zM3.75 2A1.75 1.75 0 002 3.75v8.5c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0014 12.25v-3.5a.75.75 0 00-1.5 0v3.5a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25v-8.5a.25.25 0 01.25-.25h3.5a.75.75 0 000-1.5h-3.5z"></path>
               </svg>
             </a>
+            <button type="button" class="btn-close-drawer">✕ Close</button>
           </div>
         </div>
 
-        <div class="drawer-body">
-          ${item.body ? escapeHtml(item.body) : "<em style='color:var(--text-faint);'>No description provided.</em>"}
+        <div class="iframe-container">
+          <iframe class="preview-iframe" data-src="/view?url=${encodeURIComponent(item.url)}" title="GitHub Page Preview"></iframe>
         </div>
-
-        ${
-          item.recentComments.length > 0
-            ? `<div class="drawer-comments-section">
-                 <div class="drawer-section-title">Latest Discussion Activity</div>
-                 ${item.recentComments
-                   .map(
-                     (c) => `
-                   <div class="drawer-comment-card">
-                     <div class="drawer-comment-meta">
-                       <b>@${escapeHtml(c.author?.login || "user")}</b>
-                       <span>commented ${timeAgo(c.createdAt)}:</span>
-                     </div>
-                     <div class="drawer-comment-text">${escapeHtml(c.body)}</div>
-                   </div>`
-                   )
-                   .join("")}
-               </div>`
-            : ""
-        }
       </div>
     `;
 
     // Toggle Preview listener
     const previewBtn = row.querySelector(".btn-preview-toggle");
     const drawer = row.querySelector(".preview-drawer");
+    const closeBtn = row.querySelector(".btn-close-drawer");
+    const iframe = row.querySelector(".preview-iframe");
 
-    previewBtn.addEventListener("click", () => {
-      const nowOpen = drawer.classList.toggle("open");
-      previewBtn.classList.toggle("expanded", nowOpen);
-      if (nowOpen) {
+    function setDrawerOpen(open) {
+      drawer.classList.toggle("open", open);
+      previewBtn.classList.toggle("expanded", open);
+      if (open) {
         state.expandedPreviews.add(item.id);
+        if (iframe && !iframe.src && iframe.dataset.src) {
+          iframe.src = iframe.dataset.src;
+        }
       } else {
         state.expandedPreviews.delete(item.id);
       }
+    }
+
+    previewBtn.addEventListener("click", () => {
+      setDrawerOpen(!drawer.classList.contains("open"));
+    });
+
+    closeBtn.addEventListener("click", () => {
+      setDrawerOpen(false);
     });
 
     return row;

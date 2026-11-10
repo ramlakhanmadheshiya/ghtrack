@@ -854,24 +854,19 @@ body {
   transform: rotate(180deg);
 }
 
-/* ── Native In-App GitHub Preview Drawer ───────────────────────────── */
+/* ── Native In-App GitHub Real Page Preview Drawer ─────────────────── */
 .preview-drawer {
   display: none;
   margin-top: 12px;
-  padding: 14px 16px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--canvas-subtle);
   animation: slideDown 0.2s ease;
+  overflow: hidden;
 }
 
 .preview-drawer.open {
   display: block;
-}
-
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .drawer-header {
@@ -880,119 +875,99 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-bottom: 10px;
+  padding: 10px 14px;
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
 
-.drawer-branches {
+.preview-meta {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-}
-
-.branch-pill {
-  padding: 1px 7px;
-  border-radius: 4px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--link);
-}
-
-.diff-stats {
-  display: inline-flex;
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
 }
 
-.diff-add { color: var(--gh-open); font-weight: 600; }
-.diff-del { color: var(--gh-closed); font-weight: 600; }
+.preview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--gh-open);
+  background: var(--gh-open-bg);
+  border: 1px solid var(--gh-open-border);
+  padding: 1px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.preview-url {
+  color: var(--text-faint);
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .drawer-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .btn-external {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: 5px;
   border: 1px solid var(--accent-blue);
   background: var(--accent-blue);
   color: #fff;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 500;
   text-decoration: none;
+  transition: background 0.12s;
 }
 
 .btn-external:hover {
   background: var(--accent-blue-hover);
 }
 
-.drawer-body {
-  margin-top: 12px;
-  font-size: 0.86rem;
-  line-height: 1.6;
-  color: var(--text-strong);
-  max-height: 220px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--panel);
-  padding: 10px 12px;
+.btn-close-drawer {
+  background: transparent;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  border: 1px solid var(--border-muted);
-}
-
-.drawer-comments-section {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.drawer-section-title {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  text-transform: uppercase;
   color: var(--text-faint);
-  margin-bottom: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 3px 8px;
+  transition: all 0.12s;
 }
 
-.drawer-comment-card {
-  padding: 8px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--border-muted);
-  background: var(--panel);
-  margin-bottom: 6px;
-  font-size: 0.82rem;
-}
-
-.drawer-comment-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-faint);
-  margin-bottom: 4px;
-}
-
-.drawer-comment-meta b {
+.btn-close-drawer:hover {
   color: var(--text-white);
+  border-color: var(--border-hover);
 }
 
-.drawer-comment-text {
-  color: var(--text-strong);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
+.iframe-container {
+  position: relative;
+  width: 100%;
+  height: 540px;
+  background: #ffffff;
+}
+
+:root[data-theme="dark"] .iframe-container {
+  background: #0d1117;
+}
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
 }
 
 /* ── Bottom Pager ──────────────────────────────────────────────────── */

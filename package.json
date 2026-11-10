@@ -1,0 +1,12 @@
+{
+  "name": "ghtrack",
+  "version": "1.0.0",
+  "description": "Ultra-fast, zero-cost lifetime tracker for your GitHub PRs, issues, comments, CI status, and reviews",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["github", "pr-tracker", "telemetry"],
+  "author": "Ramlakhan Madheshiya",
+  "license": "MIT"
+}
