@@ -8,24 +8,13 @@ Hosted at `https://theramlakhan.com/ghtrack/`.
 
 ## How it works
 
-ghtrack does not download a person's whole history. It asks GitHub's search API the exact question the screen needs:
-
-- **Each number is one request.** GitHub returns the count of a search without sending the items, so totals are exact for any account size (tested on an account with 48,000+ items).
-- **Each page of the list is one request** of 100 items, sorted by latest activity. Pages past GitHub's 1,000-result cap are reached by continuing from the last timestamp, and far pages are read from whichever end of the list is closer.
-- **The request scheduler follows GitHub's limits.** Searches without login are capped at 10 per minute per visitor. The first load uses about 7, keeps 2–3 free for clicks, and runs background work (row tags, charts) only with the leftover budget. If the limit is hit, the request waits for GitHub's reset time and continues on its own.
-- **Results are cached** in memory and IndexedDB for 10 minutes, so going back and forth costs nothing.
+- **Exact numbers in seconds.** A person's involvement is split into 5 non-overlapping buckets (created › assigned › reviewed › commented › mentioned/other). The first GitHub search of each bucket returns its exact total, so the headline numbers are ready in 1–2 seconds for any account.
+- **Whole list in the browser.** Each bucket is then loaded 100 items per request and kept in memory, so every filter, page and dropdown is instant. About 1,000 items a minute (GitHub's limit without login); a 1,100-item account is complete in ~20 seconds.
+- **Saved copy.** The list is saved in IndexedDB; the next visit shows it instantly and only fetches what changed.
 
 ## Filters
 
-Every item is counted in **exactly one** relationship bucket, its strongest link to the person, so the buckets always add up to the total:
-
-`Created › Assigned › Reviewed › Commented › Mentioned & other`
-
-An issue you opened, commented on, got assigned to and were mentioned in counts once, under **Created**. Opening the row's preview shows every link.
-
-- **My work** = Created + Assigned + Reviewed + Commented (the default; hides mention-only noise)
-- **Everything** = all buckets (GitHub's `involves:`)
-- **Type** (PRs / Issues), **State** (Open / Draft / Merged / Closed / Not planned), **Opened** (lifetime, last 30/90 days, last 12 months, each year), **Repository**, **Text search**
+Kind (PRs / Issues), Status, **Role** (Created / Assigned / Reviewed / Commented / Mentioned — each item counted once, under its strongest link), Repository, Timeframe and text search.
 
 ## Preview
 

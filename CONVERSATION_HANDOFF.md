@@ -127,32 +127,30 @@ The user observed 3 different lifetime totals for `@shravanngoswamii`:
 
 ---
 
-## 5. Current Architecture (v2, Nov 2026): "Ask GitHub, don't download everything"
+## 5. Current Architecture (v3, Nov 2026)
 
-The old tri-stream GraphQL harvester and token settings were **removed**. Everything is REST search, unauthenticated.
+v2 (one search per list page, chip filters) was **rejected by the user**: list felt slower than the original, chips were disliked, "GitHub allows 10 searches a minute… loads in Xs" messages are **not allowed on the site**, and rows like "Commented · by X" were confusing. v3 = fast exact counts (kept from v2) + the original UI and in-memory list.
 
-### Numbers: one count request each
-`/search/issues?q=…&per_page=1` → `total_count`. Lifetime overview = 5 essential counts (`involves`, `author is:pr`, `author is:issue`, reviewed bucket, commented bucket) + 2 background ones (merged, open issues). "My work" total comes free from the first list page; Assigned = My work − Created − Reviewed − Commented.
+### Numbers (exact, ~1–2 s)
+The first page of each of the 5 relationship buckets returns `total_count` for free: Total = sum of buckets, Reviewed/Commented cards = bucket totals, Created = created bucket. Extra count searches: `author:U is:pr` (PRs; Issues = created − PRs), merged, open issues.
 
-### Relationship buckets (non-overlapping, add up to the total)
-Order of strength: `created (author) › assigned (assignee) › reviewed (reviewed-by) › commented (commenter) › other ("Mentioned & other")`.
-A bucket query is its qualifier minus all stronger ones, e.g. commented = `commenter:U -author:U -assignee:U -reviewed-by:U`. Unions use GitHub **advanced search** (`advanced_search=true`, `OR` + parentheses). Verified: buckets sum exactly to `involves:` count.
+### Buckets (non-overlapping, sum = `involves:` total)
+`created (author) › assigned › reviewed (reviewed-by) › commented (commenter) › other (mentioned/linked)`; bucket query = qualifier minus all stronger ones (`bucketExpr`).
 
-### List: one request per 100 rows
-`ResultStream` pages a query (sort=updated desc). After 1,000 results it continues with `updated:<=<last timestamp>` (dedup by URL). Far pages use a reverse stream (`order=asc`) when cheaper.
+### List: whole history in the browser
+`BucketHarvester` loads each bucket 100 items per request (past GitHub's 1,000 cap via `updated:<=` windows). Every item carries `item.bucket`. Filters (Kind, Status, Role, Repo, Timeframe, text) and paging are **client-side and instant**, like the original app. Throughput ≈ 1,000 items/min (GitHub's unauthenticated search limit); 1,099 items ≈ 22 s; 48k items ≈ 45 min in the background.
+
+### Saved copy (IndexedDB `snapshots` store)
+The whole list is saved per person. Next visit renders it instantly, re-fetches the first page of each bucket (fresh counts + recent changes), catches up to the previous sync time, then resumes unfinished buckets from their oldest saved item.
+
+### UI rules from the user
+- Original filter bar (Kind / Status / Repo / search + Timeframe) plus one **Role** dropdown (counts in options). No chip rows.
+- Row: `by <author> · 💬 n · ★ @user commented` (plain sentence). Author is green when it's the tracked user.
+- No rate-limit/countdown text anywhere; background progress is one quiet banner line.
+- Preview: conversation rendered inside the row (public); real page via `server.js /view` (local).
 
 ### Request scheduler (`apiGet` / `pump`)
-Buckets: `search` (10/min unauth) and `core` (60/hr). Priorities: 0 = what the user looks at, 1 = numbers, 2 = row tags/charts, 3 = extra counts. Background (≥2) keeps 2 requests in reserve for clicks and waits while budget is unknown. Rate-limited search requests auto-retry at GitHub's reset time; 5xx/timeouts retry twice. Remaining budget is tracked as the minimum seen within a reset window (responses arrive out of order).
-**Gotchas found:** `application/vnd.github.html+json` on search makes huge queries time out (502) → never request HTML for lists. `-is:merged` silently drops issues → "Closed" state is built per type.
-
-### Row tags & preview
-Row shows the bucket it's counted under (created/assigned from data; reviewed/commented via ≤2 window-limited searches at low priority). Preview (core API: `/issues/N` html + `/issues/N/timeline`) renders the conversation and detects every link (commented, reviewed, assigned, mentioned).
-
-### Analytics
-Targets & PR donut = exact counts (respect the "Opened" timeframe). Year chart = one count per year (+ "Earlier" bar for threads opened before the account existed). Heatmap, monthly and top repos = items of the timeframe (default last 12 months) loaded in the background, capped at 5,000.
-
-### Local dev
-`node server.js` adds `/api/gh/*` (REST proxy using `gh auth token`, 30 searches/min) and `/view` (real page iframe). `app.js` detects the proxy automatically; any other static server behaves like production.
+Priorities: 0 first pages/previews, 1 catch-up + PR count, 2 merged/open counts, 3 background harvest. Waits silently for GitHub's reset; retries 5xx/timeouts; tracks the minimum remaining budget per window. Never request `html+json` on searches (huge queries time out).
 
 ## 6. Codebase File Structure
 
@@ -168,9 +166,9 @@ deploy.sh    # publish to theramlakhan.com/ghtrack with content-hash cache busti
 
 | Account | Result |
 | :--- | :--- |
-| @ChrisRackauckas (48,284 involved) | list + exact numbers in ~2.5s; next clicks instant |
-| @shravanngoswamii (1,099) | ~2.3s; charts complete after ~70s in background |
-| @ramlakhanmadheshiya (33) | ~2s |
+| @ChrisRackauckas (48,286) | numbers in ~6s, list grows ~1,000/min, filters instant |
+| @shravanngoswamii (1,099) | numbers ~2s, full list in ~22s, revisit instant |
+| @ramlakhanmadheshiya (33) | everything in ~1–6s, revisit instant |
 | unknown user / organization | clear message, 1 request |
 
 ## 8. Quick Guide for Future Agents
