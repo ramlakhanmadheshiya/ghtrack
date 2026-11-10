@@ -22,6 +22,12 @@ mkdir -p "$WORK/$DEST"
 
 cp -R "$ROOT/index.html" "$ROOT/app.js" "$ROOT/app.css" "$ROOT/favicon.svg" "$ROOT/assets" "$WORK/$DEST/"
 
+# Cache-bust: stamp index.html with a hash of app.js + app.css so browsers/CDN
+# (which cache JS/CSS for 4 hours) always fetch the new files after a deploy.
+ASSET_HASH="$(cat "$ROOT/app.js" "$ROOT/app.css" | shasum | cut -c1-10)"
+perl -pi -e "s/\?v=[A-Za-z0-9_]+/?v=$ASSET_HASH/g" "$WORK/$DEST/index.html"
+echo "Asset version: $ASSET_HASH"
+
 # Remove OS artifacts
 find "$WORK/$DEST" -name .DS_Store -delete
 
