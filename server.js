@@ -97,6 +97,31 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 1b. REST API proxy for local development (GET only): /api/gh/<path> -> api.github.com/<path>
+  // Uses your local `gh` login so searches run at 30/min instead of 10/min.
+  if (pathname.startsWith("/api/gh/") && req.method === "GET") {
+    const target = `https://api.github.com/${pathname.slice("/api/gh/".length)}${parsedUrl.search}`;
+    const headers = {
+      "User-Agent": "ghtrack-server/1.0",
+      Accept: req.headers.accept || "application/vnd.github+json",
+    };
+    if (GITHUB_TOKEN) headers["Authorization"] = `Bearer ${GITHUB_TOKEN}`;
+    https
+      .get(target, { headers }, (ghRes) => {
+        const out = { "Content-Type": ghRes.headers["content-type"] || "application/json" };
+        for (const h of ["x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-limit", "retry-after", "link"]) {
+          if (ghRes.headers[h]) out[h] = ghRes.headers[h];
+        }
+        res.writeHead(ghRes.statusCode || 502, out);
+        ghRes.pipe(res);
+      })
+      .on("error", (err) => {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: err.message }));
+      });
+    return;
+  }
+
   // 2. Real GitHub Page Embedder (/view?url=...)
   // Strips X-Frame-Options and Content-Security-Policy so GitHub can render in iframe
   if (pathname === "/view") {

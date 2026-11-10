@@ -93,6 +93,12 @@
 
 ---
 
+### Request 9: Stale Cache Bug + No-Token Rewrite (v2)
+- User saw `⚠ Paused at 350 items: GitHub unauthenticated rate limit reached` even after the countdown fix shipped. **Cause:** the deploy changed `app.js` but kept `?v=20261110_02`, and the CDN caches JS for 4 hours, so browsers kept running old code. **Fix:** `deploy.sh` now stamps `?v=<content hash>` automatically.
+- User requirements (final): **no token, no login, no server**; must be fast for huge accounts (e.g. `@ChrisRackauckas`, 48,284 items); a filter that doesn't confuse (items must not be counted 4 times); preview must show the real conversation.
+- The user explicitly does **not** want to create or store any GitHub token (security concern). Do not reintroduce token UI.
+- The old "real GitHub page" preview only ever worked on `localhost` via `server.js /view` (GitHub sends `X-Frame-Options: deny`). Public site now renders the conversation natively; local keeps the real page.
+
 ## 4. Deep Forensic Analysis of Critical Bugs & Fixes
 
 ### Bug 1: Why 3 Different Numbers Occurred (1,233 vs. 599 vs. 1,119)
@@ -121,117 +127,56 @@ The user observed 3 different lifetime totals for `@shravanngoswamii`:
 
 ---
 
-## 5. Dual-Engine Architectural Design
+## 5. Current Architecture (v2, Nov 2026): "Ask GitHub, don't download everything"
+
+The old tri-stream GraphQL harvester and token settings were **removed**. Everything is REST search, unauthenticated.
+
+### Numbers: one count request each
+`/search/issues?q=…&per_page=1` → `total_count`. Lifetime overview = 5 essential counts (`involves`, `author is:pr`, `author is:issue`, reviewed bucket, commented bucket) + 2 background ones (merged, open issues). "My work" total comes free from the first list page; Assigned = My work − Created − Reviewed − Commented.
+
+### Relationship buckets (non-overlapping, add up to the total)
+Order of strength: `created (author) › assigned (assignee) › reviewed (reviewed-by) › commented (commenter) › other ("Mentioned & other")`.
+A bucket query is its qualifier minus all stronger ones, e.g. commented = `commenter:U -author:U -assignee:U -reviewed-by:U`. Unions use GitHub **advanced search** (`advanced_search=true`, `OR` + parentheses). Verified: buckets sum exactly to `involves:` count.
+
+### List: one request per 100 rows
+`ResultStream` pages a query (sort=updated desc). After 1,000 results it continues with `updated:<=<last timestamp>` (dedup by URL). Far pages use a reverse stream (`order=asc`) when cheaper.
+
+### Request scheduler (`apiGet` / `pump`)
+Buckets: `search` (10/min unauth) and `core` (60/hr). Priorities: 0 = what the user looks at, 1 = numbers, 2 = row tags/charts, 3 = extra counts. Background (≥2) keeps 2 requests in reserve for clicks and waits while budget is unknown. Rate-limited search requests auto-retry at GitHub's reset time; 5xx/timeouts retry twice. Remaining budget is tracked as the minimum seen within a reset window (responses arrive out of order).
+**Gotchas found:** `application/vnd.github.html+json` on search makes huge queries time out (502) → never request HTML for lists. `-is:merged` silently drops issues → "Closed" state is built per type.
+
+### Row tags & preview
+Row shows the bucket it's counted under (created/assigned from data; reviewed/commented via ≤2 window-limited searches at low priority). Preview (core API: `/issues/N` html + `/issues/N/timeline`) renders the conversation and detects every link (commented, reviewed, assigned, mentioned).
+
+### Analytics
+Targets & PR donut = exact counts (respect the "Opened" timeframe). Year chart = one count per year (+ "Earlier" bar for threads opened before the account existed). Heatmap, monthly and top repos = items of the timeframe (default last 12 months) loaded in the background, capped at 5,000.
+
+### Local dev
+`node server.js` adds `/api/gh/*` (REST proxy using `gh auth token`, 30 searches/min) and `/view` (real page iframe). `app.js` detects the proxy automatically; any other static server behaves like production.
+
+## 6. Codebase File Structure
 
 ```
-                     ┌────────────────────────────────────────────────────────┐
-                     │                 User Visits ghtrack                    │
-                     └──────────────────────────┬─────────────────────────────┘
-                                                │
-                     ┌──────────────────────────┴─────────────────────────────┐
-                     │            Detect Hosting Environment                  │
-                     └──────────┬─────────────────────────────────┬───────────┘
-                                │                                 │
-                 Local Dev (localhost:3000)        Production (theramlakhan.com)
-                                │                                 │
-           ┌────────────────────┴──────────┐       ┌──────────────┴────────────────┐
-           │ Uses server.js Proxy          │       │ Has GitHub Token in Settings? │
-           │ - 5,000 req/hr via gh auth    │       └──────┬─────────────────┬──────┘
-           │ - Strips X-Frame-Options      │              │                 │
-           │ - Live GitHub iframe viewer   │           YES│                 │NO
-           └───────────────────────────────┘              │                 │
-                                            ┌─────────────┴─────┐     ┌─────┴───────────────┐
-                                            │ Direct GraphQL    │     │ Public REST Search  │
-                                            │ - 5,000 req/hr    │     │ - 10 req/min        │
-                                            │ - Tri-stream      │     │ - Auto-resuming     │
-                                            │ - 1,255 items     │     │   60s countdown     │
-                                            └───────────────────┘     └─────────────────────┘
+index.html   # UI (no token modal), relationship chips, type/state/repo/text filters
+app.js       # scheduler, query builder, ResultStream, rendering, preview, analytics (vanilla JS)
+app.css      # theme variables; v2 styles appended at the bottom
+server.js    # local dev: static files + /api/gh proxy + /view embedder
+deploy.sh    # publish to theramlakhan.com/ghtrack with content-hash cache busting
 ```
 
-### 1. Local Development Engine (`server.js`)
-- Runs via `node server.js` on port 3000.
-- Zero npm dependencies — uses native `http`, `https`, `fs`, `path`, and `child_process`.
-- Automatically calls `gh auth token` from the user's terminal to enable **5,000 req/hr** out of the box.
-- Endpoints:
-  - `POST /api/graphql`: Proxies GraphQL requests to `https://api.github.com/graphql`.
-  - `GET /view?url=...`: Fetches raw GitHub HTML, strips header/navigation and framing restrictions (`X-Frame-Options: ALLOWALL`), enabling the inline iframe preview.
+## 7. Verified Behaviour (headless Chrome, fresh profiles, no token)
 
-### 2. Production Static Engine (`https://theramlakhan.com/ghtrack/`)
-- Hosted on GitHub Pages (pure client-side).
-- If the user enters a personal access token (PAT) in Settings:
-  - Token is stored strictly in the browser's `localStorage` (`ghtrack_token`).
-  - Calls `https://api.github.com/graphql` directly with 5,000 req/hr.
-- If unauthenticated:
-  - Falls back to GitHub REST Search (`/search/issues`).
-  - When hitting GitHub's 10 req/min limit, it displays an auto-resuming countdown:
-    `⏳ Paused at 500 items (public rate limit: 10 req/min). Resuming in 58s, or add a free token for 5,000 req/hr...`
-  - Offers a 1-click token generation link with 0 permissions needed:
-    `https://github.com/settings/tokens/new?description=ghtrack&scopes=`
+| Account | Result |
+| :--- | :--- |
+| @ChrisRackauckas (48,284 involved) | list + exact numbers in ~2.5s; next clicks instant |
+| @shravanngoswamii (1,099) | ~2.3s; charts complete after ~70s in background |
+| @ramlakhanmadheshiya (33) | ~2s |
+| unknown user / organization | clear message, 1 request |
 
----
-
-## 6. Tri-Stream Harvester Engine
-
-To capture 100% of a developer's lifetime activity, `app.js` runs three parallel GraphQL streams:
-
-| Stream | Query Filter | Description |
-| :--- | :--- | :--- |
-| **Stream 1** | `involves:${login} sort:updated-desc` | Authored, assigned, mentioned, and involved threads. |
-| **Stream 2** | `commenter:${login} sort:updated-desc` | GitHub's native index for threads where the user posted comments. |
-| **Stream 3** | `user:${login} sort:updated-desc` | Issues and pull requests in user-owned repositories. |
-
-### Deduplication
-All streams feed into a single master Map: `state.itemsMap.set(item.id, item)`. Keyed by GitHub issue/PR URL, ensuring zero duplicate entries.
-
-### Windowing Past 1,000 Items
-GitHub search hard-stops queries at 1,000 items. When a stream hits 1,000 items:
-```javascript
-const oldestDate = nodes[nodes.length - 1]?.updatedAt;
-currentQuery = `${stream.base} updated:<${oldestDate} sort:updated-desc`;
-cursor = null;
-```
-This shifts the query window backward in time and continues streaming until all historical activity is retrieved.
-
----
-
-## 7. Codebase File Structure
-
-```
-/Users/ramlakhan/Desktop/Projests/ghtrack/
-├── index.html               # Single-page application UI structure & modals
-├── app.js                   # Core application logic (~1,900 lines, zero dependencies)
-├── app.css                  # Custom stylesheet with CSS variables & dark/light themes
-├── server.js                # Native Node.js dev server & iframe unblocker
-├── deploy.sh                # Automated deploy script to theramlakhan.com/ghtrack/
-├── favicon.svg              # Dynamic multi-color theme-adaptive SVG favicon
-└── assets/                  # Static assets and icons
-```
-
-### Key Functions in `app.js`
-- `startTracking(username)`: Resets state and UI, pulls initial 50 items instantly, renders feed and analytics, and triggers background streaming.
-- `streamRemainingBatches()`: Multi-source GraphQL tri-stream harvester with live page numbering and rate limit protection.
-- `streamRestPages()`: REST API harvester with auto-resuming countdown for unauthenticated browsing.
-- `renderList()`: Renders 50-item pages with pagination buttons and preview drawers.
-- `createItemRow(item)`: Constructs row elements with Primer status badges, CI pills, labels, and preview drawers.
-- `renderAnalytics()`: Master coordinator for targets, heatmaps, donut charts, top repos, and monthly/yearly trends.
-- `openDB()`, `saveCachedProfile()`, `clearAllCache()`: IndexedDB persistence layer.
-
----
-
-## 8. Current Operational State & Verification
-
-1. **Local Dev Server**: Stopped (port 3000 free).
-2. **Production Site**: Live and operational at **[https://theramlakhan.com/ghtrack/](https://theramlakhan.com/ghtrack/)**.
-3. **Git Branch**: Clean on `main`, synchronized with `origin/main`.
-4. **Parent Site**: Synced to `ramlakhanmadheshiya.github.io/public/ghtrack` with deployment successful.
-
----
-
-## 9. Quick Guide for Future Agents
-
-If continuing work or adding new features:
-1. **Never install npm dependencies for client runtime**: Keep `ghtrack` vanilla JS/CSS for zero bundle bloat and instant loading.
-2. **Deployment**: Always use `./deploy.sh` to update `theramlakhan.com/ghtrack/`.
-3. **Batch Size**: Preserve `API_PAGE_SIZE = 50;` and `FEED_PAGE_SIZE = 50;` as requested by user.
-4. **Cache Invalidation**: If altering the data structure of items, increment `DB_VERSION` in `app.js` and update `?v=` in `index.html`.
-5. **Rate Limits**: Never remove the rate-limit auto-resuming countdown or honest error banners.
+## 8. Quick Guide for Future Agents
+1. **No tokens, no login, no backend.** User requirement.
+2. **No runtime npm dependencies.** Vanilla JS/CSS.
+3. **Deploy with `./deploy.sh`** (auto cache-bust). Never edit other parts of the parent site.
+4. **Bump `DB_VERSION`** in `app.js` if the cached response shape changes.
+5. **Respect the scheduler**: every GitHub call goes through `apiGet` with a priority; never fire search requests directly.
+6. Known limits (GitHub's, not ours): 10 searches/min per visitor; previews 60/hr ≈ 25–30 per hour; heatmap/top-repos for huge accounts fill in over a few minutes.
