@@ -319,6 +319,11 @@
 
     if (!res.ok) {
       const msg = data?.message || `GitHub error: ${res.status}`;
+      if (res.status === 422) {
+        const err = new Error(`No GitHub user named @${login} was found. Check the spelling`);
+        err.notFound = true;
+        throw err;
+      }
       if (isRateLimited(res, data)) {
         const wait = rateLimitWaitSeconds(res);
         throw new Error(`GitHub public rate limit reached (10 searches/min). Try again in ${wait}s, or add a free token for 5,000 req/hr`);
@@ -642,7 +647,9 @@
       } catch (restErr) {
         if (searchId !== activeSearchId) return;
         dom.listLoading.style.display = "none";
-        dom.streamText.innerHTML = `⚠ Could not load GitHub data: ${escapeHtml(restErr.message)}. <a href="javascript:void(0)" id="btn-stream-settings" style="color:var(--gh-open);text-decoration:underline;">Configure token in Settings</a>.`;
+        dom.streamText.innerHTML = restErr.notFound
+          ? `⚠ ${escapeHtml(restErr.message)}.`
+          : `⚠ Could not load GitHub data: ${escapeHtml(restErr.message)}. <a href="javascript:void(0)" id="btn-stream-settings" style="color:var(--gh-open);text-decoration:underline;">Configure token in Settings</a>.`;
         const btn = document.getElementById("btn-stream-settings");
         if (btn) btn.onclick = () => dom.modalToken?.classList.add("open");
         if (!state.itemsMap.size) {
