@@ -225,16 +225,17 @@
     ${ROW_FRAGMENT}
   `;
 
-  // ── GitHub API Fetcher ──────────────────────────────────────────────
+  // ── GitHub API Fetcher (Dual Engine: GraphQL + REST Fallback) ───────
   async function fetchGraphQL(query, variables) {
+    if (!state.token) {
+      throw new Error("NO_TOKEN");
+    }
+
     const headers = {
       "Content-Type": "application/json",
       "User-Agent": "ghtrack-web/1.0",
+      "Authorization": `Bearer ${state.token}`,
     };
-
-    if (state.token) {
-      headers["Authorization"] = `Bearer ${state.token}`;
-    }
 
     const res = await fetch(GITHUB_GRAPHQL_ENDPOINT, {
       method: "POST",
@@ -256,6 +257,98 @@
     }
 
     return data.data;
+  }
+
+  // REST search fallback for unauthenticated public browsing (zero token needed)
+  async function fetchRestSearch(login, page = 1) {
+    const headers = {
+      "User-Agent": "ghtrack-web/1.0",
+      "Accept": "application/vnd.github.v3+json",
+    };
+    if (state.token) {
+      headers["Authorization"] = `Bearer ${state.token}`;
+    }
+
+    const url = `${GITHUB_REST_ENDPOINT}/search/issues?q=involves:${encodeURIComponent(login)}&sort=updated&order=desc&per_page=${PAGE_SIZE}&page=${page}`;
+    const res = await fetch(url, { headers });
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const msg = data?.message || `GitHub error: ${res.status}`;
+      if (res.status === 403) {
+        throw new Error("GitHub rate limit reached for unauthenticated browsing. Enter a free token via Settings for 5,000 req/hr!");
+      }
+      throw new Error(msg);
+    }
+
+    return data;
+  }
+
+  function normalizeRestNode(raw, currentLogin) {
+    if (!raw || !raw.html_url) return null;
+    const isPR = Boolean(raw.pull_request);
+    const isMerged = Boolean(raw.pull_request?.merged_at);
+    const authorLogin = raw.user?.login || "ghost";
+    const isAuthor = authorLogin.toLowerCase() === currentLogin.toLowerCase();
+
+    const repoMatch = raw.html_url.match(/github\.com\/([^/]+\/[^/]+)\/(?:pull|issues)/);
+    const repo = repoMatch ? repoMatch[1] : "unknown/repo";
+
+    let status = "open";
+    let statusLabel = "Open";
+
+    if (isPR) {
+      if (isMerged) {
+        status = "merged";
+        statusLabel = "Merged";
+      } else if (raw.state === "closed") {
+        status = "closed";
+        statusLabel = "Closed";
+      } else if (raw.draft) {
+        status = "draft";
+        statusLabel = "Draft";
+      } else {
+        status = "open";
+        statusLabel = "Open";
+      }
+    } else {
+      if (raw.state === "closed") {
+        status = raw.state_reason === "not_planned" ? "not-planned" : "closed";
+        statusLabel = raw.state_reason === "not_planned" ? "Not planned" : "Closed";
+      } else {
+        status = "open";
+        statusLabel = "Open";
+      }
+    }
+
+    return {
+      id: raw.html_url,
+      kind: isPR ? "pr" : "issue",
+      number: raw.number,
+      title: (raw.title || "").trim(),
+      url: raw.html_url,
+      repo,
+      author: authorLogin,
+      authorAvatar: raw.user?.avatar_url || "",
+      isAuthor,
+      userCommented: !isAuthor,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
+      status,
+      statusLabel,
+      body: raw.body || "",
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      baseRef: "",
+      headRef: "",
+      isConflict: false,
+      reviewDecision: null,
+      ciState: null,
+      commentsCount: raw.comments || 0,
+      recentComments: [],
+      labels: (raw.labels || []).map((l) => ({ name: l.name, color: l.color })),
+    };
   }
 
   // ── Normalization & Chips ───────────────────────────────────────────
@@ -408,48 +501,70 @@
 
     try {
       // Step 1: Initial Fast Fetch (Page 1: 50 items)
-      const data = await fetchGraphQL(SEARCH_QUERY, {
-        main: `involves:${cleanUser} sort:updated-desc`,
-        extra: `commenter:${cleanUser} sort:updated-desc`,
-        n: PAGE_SIZE,
-        cursorMain: null,
-        cursorExtra: null,
-      });
+      if (state.token) {
+        // High-speed authenticated GraphQL mode
+        const data = await fetchGraphQL(SEARCH_QUERY, {
+          main: `involves:${cleanUser} sort:updated-desc`,
+          extra: `commenter:${cleanUser} sort:updated-desc`,
+          n: PAGE_SIZE,
+          cursorMain: null,
+          cursorExtra: null,
+        });
 
-      const totalEstimated = Math.max(data.main?.issueCount || 0, data.extra?.issueCount || 0);
-      state.totalEstimated = totalEstimated;
+        const totalEstimated = Math.max(data.main?.issueCount || 0, data.extra?.issueCount || 0);
+        state.totalEstimated = totalEstimated;
 
-      const newItems = [];
-      for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
-        const item = normalizeNode(node, cleanUser);
-        if (item) {
-          state.itemsMap.set(item.id, item);
-          newItems.push(item);
+        for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
+          const item = normalizeNode(node, cleanUser);
+          if (item) state.itemsMap.set(item.id, item);
         }
-      }
 
-      // Render First 50 items immediately (< 300ms)
-      dom.listLoading.style.display = "none";
-      updateTelemetry();
-      populateRepoFilter();
-      renderList();
+        dom.listLoading.style.display = "none";
+        updateTelemetry();
+        populateRepoFilter();
+        renderList();
 
-      // Step 2: Background Streaming of All Remaining Batches
-      const hasMore = Boolean(data.main?.pageInfo?.hasNextPage || data.extra?.pageInfo?.hasNextPage);
-      if (hasMore) {
-        state.cancelStreaming = false;
-        streamRemainingBatches(
-          cleanUser,
-          data.main?.pageInfo?.endCursor,
-          data.extra?.pageInfo?.endCursor,
-          Boolean(data.main?.pageInfo?.hasNextPage),
-          Boolean(data.extra?.pageInfo?.hasNextPage),
-          totalEstimated
-        );
+        const hasMore = Boolean(data.main?.pageInfo?.hasNextPage || data.extra?.pageInfo?.hasNextPage);
+        if (hasMore) {
+          state.cancelStreaming = false;
+          streamRemainingBatches(
+            cleanUser,
+            data.main?.pageInfo?.endCursor,
+            data.extra?.pageInfo?.endCursor,
+            Boolean(data.main?.pageInfo?.hasNextPage),
+            Boolean(data.extra?.pageInfo?.hasNextPage),
+            totalEstimated
+          );
+        } else {
+          dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
+          dom.streamProgressFill.style.width = "100%";
+          saveCachedProfile(cleanUser, { items: Array.from(state.itemsMap.values()) });
+        }
       } else {
-        dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
-        dom.streamProgressFill.style.width = "100%";
-        saveCachedProfile(cleanUser, { items: Array.from(state.itemsMap.values()) });
+        // Public zero-token REST search mode
+        const data = await fetchRestSearch(cleanUser, 1);
+        const totalEstimated = data.total_count || 0;
+        state.totalEstimated = totalEstimated;
+
+        for (const raw of data.items || []) {
+          const item = normalizeRestNode(raw, cleanUser);
+          if (item) state.itemsMap.set(item.id, item);
+        }
+
+        dom.listLoading.style.display = "none";
+        updateTelemetry();
+        populateRepoFilter();
+        renderList();
+
+        const totalPages = Math.ceil(totalEstimated / PAGE_SIZE);
+        if (totalPages > 1) {
+          state.cancelStreaming = false;
+          streamRestPages(cleanUser, totalPages, totalEstimated);
+        } else {
+          dom.streamText.textContent = `✓ All ${state.itemsMap.size} lifetime items loaded`;
+          dom.streamProgressFill.style.width = "100%";
+          saveCachedProfile(cleanUser, { items: Array.from(state.itemsMap.values()) });
+        }
       }
     } catch (err) {
       dom.listLoading.style.display = "none";
@@ -516,6 +631,43 @@
     dom.streamProgressFill.style.width = "100%";
 
     // Save full dataset into IndexedDB for instant retrieval on next visit
+    saveCachedProfile(login, { items: Array.from(state.itemsMap.values()) });
+    updatePagerUI();
+  }
+
+  // Background stream processor for public REST mode
+  async function streamRestPages(login, totalPages, totalEst) {
+    state.isStreamingBackground = true;
+
+    for (let page = 2; page <= totalPages && !state.cancelStreaming; page++) {
+      const currentCount = state.itemsMap.size;
+      const progressPercent = totalEst > 0 ? Math.min(95, Math.round((currentCount / totalEst) * 100)) : 50;
+
+      dom.streamText.textContent = `⚡ Buffering background history: ${currentCount} loaded (${progressPercent}%)...`;
+      dom.streamProgressFill.style.width = `${progressPercent}%`;
+
+      try {
+        const data = await fetchRestSearch(login, page);
+        for (const raw of data.items || []) {
+          const item = normalizeRestNode(raw, login);
+          if (item) state.itemsMap.set(item.id, item);
+        }
+
+        updateTelemetry();
+        populateRepoFilter();
+        updatePagerUI();
+
+        // 350ms delay between REST pages to respect unauthenticated limits
+        await new Promise((r) => setTimeout(r, 350));
+      } catch (err) {
+        console.warn("Background REST stream paused:", err.message);
+        break;
+      }
+    }
+
+    state.isStreamingBackground = false;
+    dom.streamText.textContent = `✓ 100% lifetime history loaded (${state.itemsMap.size} items buffered in memory & IndexedDB)`;
+    dom.streamProgressFill.style.width = "100%";
     saveCachedProfile(login, { items: Array.from(state.itemsMap.values()) });
     updatePagerUI();
   }
