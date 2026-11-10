@@ -168,6 +168,22 @@ Priorities: 0 first pages/previews, 1 catch-up + PR count, 2 merged/open counts,
   Chart type choice is remembered per viewer (localStorage `ghtrack_chart_<id>`).
 - Dropdowns: `createDropdown()` (keyboard + search). No native `<select>` anywhere.
 
+## Accounts hidden from GitHub search (v2.2)
+Some public accounts (e.g. @AJ0070) return 422 "The listed users cannot be searched" for any user qualifier
+(`involves:`, `author:` …). The same qualifiers work when scoped to repositories. ghtrack then:
+1. Discovers repos from public sources: `/users/U/events/public` (≤3 pages), plain-text search for the login
+   (≤3 pages), owned non-fork repos with activity, and parents of the 10 most recently pushed forks.
+2. Groups repos (≤40 per group, ≤1300 chars) and runs the normal bucket harvesters inside each group:
+   `(repo:a OR repo:b …) author:U is:pr` etc. Counts = sum across groups (`recomputeCounts`).
+3. Stores the groups in the snapshot (`scopes`) so revisits skip discovery. Profile shows
+   "Hidden from GitHub search · N repositories scanned". Activity in undiscovered repos can be missing.
+
+## v2.2 UI
+Borderless tonal surfaces (override layer at the end of `app.css`), theme menu (System/Light/Dark),
+new bar-chart logo, Refresh/Export removed (refresh happens automatically on every visit),
+time charts scroll horizontally instead of squeezing (hidden scrollbars, drag to pan,
+−/+/fit buttons, ⌘/Ctrl+wheel zoom, newest data shown first). Contact: hello@theramlakhan.com in footer.
+
 ## 6. Codebase File Structure
 
 ```
