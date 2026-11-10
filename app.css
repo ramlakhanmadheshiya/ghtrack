@@ -854,7 +854,454 @@ body {
   transform: rotate(180deg);
 }
 
-/* ── Native In-App GitHub Real Page Preview Drawer ─────────────────── */
+/* ── View Switcher & Date Filter Bar ────────────────────────────── */
+.view-header-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--canvas-subtle);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-tab:hover {
+  color: var(--text-white);
+}
+
+.view-tab.active {
+  background: var(--panel);
+  color: var(--text-white);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.badge-new {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--gh-open);
+  background: var(--gh-open-bg);
+  border: 1px solid var(--gh-open-border);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.date-filter-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Targets Grid (Milestones & Goals) ─────────────────────────────── */
+.targets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.target-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.target-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.target-title {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.target-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-strong);
+}
+
+.target-badge.achieved {
+  background: var(--gh-open-bg);
+  color: var(--gh-open);
+  border-color: var(--gh-open-border);
+}
+
+.target-value {
+  font-family: var(--font-mono);
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--text-white);
+  line-height: 1.2;
+}
+
+.target-goal {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.target-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--canvas-subtle);
+  border-radius: 999px;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-muted);
+}
+
+.target-bar-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.target-bar-fill.fill-purple { background: var(--gh-merged); }
+.target-bar-fill.fill-green { background: var(--gh-open); }
+.target-bar-fill.fill-blue { background: var(--link); }
+
+.target-sub {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin-top: 6px;
+  font-family: var(--font-mono);
+}
+
+/* ── GitHub Contribution Heatmap Card ──────────────────────────────── */
+.heatmap-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.card-header-flex {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.card-title {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-white);
+}
+
+.card-sub {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.year-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.year-pill {
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--canvas-subtle);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.year-pill:hover {
+  color: var(--text-white);
+  border-color: var(--border-hover);
+}
+
+.year-pill.active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+
+.heatmap-scroll-wrap {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.heatmap-calendar svg {
+  display: block;
+  min-width: 720px;
+}
+
+.heatmap-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.lvl-0 { background: #161b22; border: 1px solid rgba(255, 255, 255, 0.05); }
+.lvl-1 { background: #0e4429; }
+.lvl-2 { background: #006d32; }
+.lvl-3 { background: #26a641; }
+.lvl-4 { background: #39d353; }
+
+rect.lvl-0 { fill: #161b22; }
+rect.lvl-1 { fill: #0e4429; }
+rect.lvl-2 { fill: #006d32; }
+rect.lvl-3 { fill: #26a641; }
+rect.lvl-4 { fill: #39d353; }
+
+:root[data-theme="light"] .lvl-0 { background: #ebedf0; border-color: rgba(0, 0, 0, 0.05); }
+:root[data-theme="light"] .lvl-1 { background: #9be9a8; }
+:root[data-theme="light"] .lvl-2 { background: #40c463; }
+:root[data-theme="light"] .lvl-3 { background: #30a14e; }
+:root[data-theme="light"] .lvl-4 { background: #216e39; }
+
+:root[data-theme="light"] rect.lvl-0 { fill: #ebedf0; }
+:root[data-theme="light"] rect.lvl-1 { fill: #9be9a8; }
+:root[data-theme="light"] rect.lvl-2 { fill: #40c463; }
+:root[data-theme="light"] rect.lvl-3 { fill: #30a14e; }
+:root[data-theme="light"] rect.lvl-4 { fill: #216e39; }
+
+.heatmap-month-label { fill: var(--text-faint); font-size: 10px; font-family: var(--font-mono); }
+.heatmap-day-label { fill: var(--text-faint); font-size: 10px; font-family: var(--font-mono); }
+
+.chart-bar-body.peak-bar {
+  background: var(--accent-blue-hover);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+
+/* ── Charts Grid ───────────────────────────────────────────────────── */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.analytics-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+
+.card-header {
+  margin-bottom: 14px;
+}
+
+/* Donut Chart */
+.donut-chart-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-around;
+  gap: 16px;
+  min-height: 180px;
+}
+
+.donut-svg-container {
+  width: 160px;
+  height: 160px;
+  flex: none;
+}
+
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  flex: 1;
+  min-width: 150px;
+}
+
+.donut-legend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.donut-legend-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-strong);
+}
+
+.legend-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.donut-legend-val {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* Top Repos Horizontal Bars */
+.top-repos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.top-repo-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.top-repo-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.top-repo-name {
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
+.top-repo-count {
+  color: var(--text-faint);
+}
+
+.top-repo-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--canvas-subtle);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.top-repo-bar-fill {
+  height: 100%;
+  background: var(--link);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* Bar Charts Container (Yearly & Monthly) */
+.bar-chart-container {
+  width: 100%;
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  position: relative;
+}
+
+.chart-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.chart-bar-body {
+  width: 100%;
+  max-width: 28px;
+  background: var(--link);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: height 0.3s ease, background 0.15s;
+  cursor: pointer;
+}
+
+.chart-bar-body:hover {
+  background: var(--accent-blue-hover);
+  filter: brightness(1.2);
+}
+
+.chart-bar-label {
+  color: var(--text-faint);
+}
+
+.chart-bar-val {
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 0.68rem;
+  margin-bottom: 2px;
+}
+
 .preview-drawer {
   display: none;
   margin-top: 12px;

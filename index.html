@@ -118,10 +118,183 @@
       </div>
     </section>
 
-    <!-- Main Content / Controls & Paging -->
+    <!-- Main Content / Views & Controls -->
     <main id="main-content" style="display:none;">
-      <!-- Controls Bar -->
-      <div class="controls-bar">
+      <!-- Dashboard Mode & Date Range Bar -->
+      <div class="view-header-bar">
+        <div class="view-tabs" role="tablist">
+          <button type="button" id="tab-btn-feed" class="view-tab active" role="tab" aria-selected="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+              <path fill-rule="evenodd" d="M2 3.75C2 2.784 2.784 2 3.75 2h8.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0112.25 14h-8.5A1.75 1.75 0 012 12.25v-8.5zm1.75-.25a.25.25 0 00-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 00.25-.25v-8.5a.25.25 0 00-.25-.25h-8.5zM4 5.5a.75.75 0 01.75-.75h6.5a.75.75 0 010 1.5h-6.5A.75.75 0 014 5.5zm0 3a.75.75 0 01.75-.75h6.5a.75.75 0 010 1.5h-6.5A.75.75 0 014 8.5zm0 3a.75.75 0 01.75-.75h4a.75.75 0 010 1.5h-4A.75.75 0 014 11.5z"></path>
+            </svg>
+            <span>Work Feed</span>
+          </button>
+          <button type="button" id="tab-btn-analytics" class="view-tab" role="tab" aria-selected="false">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+              <path d="M1.5 1.75a.75.75 0 00-1.5 0v12.5c0 .414.336.75.75.75h14.5a.75.75 0 000-1.5H1.5V1.75z"></path>
+              <path d="M4.25 6.5a.75.75 0 01.75.75v5a.75.75 0 01-1.5 0v-5a.75.75 0 01.75-.75zm4-3a.75.75 0 01.75.75v8a.75.75 0 01-1.5 0v-8a.75.75 0 01.75-.75zm4 4.5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5a.75.75 0 01.75-.75z"></path>
+            </svg>
+            <span>Visual Analytics</span>
+            <span class="badge-new">PRO</span>
+          </button>
+        </div>
+
+        <!-- Global Date Range Filter -->
+        <div class="date-filter-wrap">
+          <label for="date-range-select" class="filter-label">Timeframe:</label>
+          <select id="date-range-select" class="custom-select">
+            <option value="all">Lifetime (All Time)</option>
+            <option value="2026">Year 2026</option>
+            <option value="2025">Year 2025</option>
+            <option value="2024">Year 2024</option>
+            <option value="90d">Last 90 Days</option>
+            <option value="30d">Last 30 Days</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ── SECTION: VISUAL ANALYTICS VIEW ────────────────────── -->
+      <section id="analytics-view" class="analytics-view" style="display:none;">
+        <!-- Target Tracking Cards (Dynamic Milestones) -->
+        <div class="targets-grid">
+          <div class="target-card">
+            <div class="target-header">
+              <span class="target-title">PR Milestone</span>
+              <span id="target-pr-status" class="target-badge">On Track</span>
+            </div>
+            <div class="target-value"><span id="target-pr-val">0</span> <span class="target-goal">/ 100 PRs</span></div>
+            <div class="target-bar-wrap">
+              <div id="target-pr-bar" class="target-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div id="target-pr-sub" class="target-sub">0% of target completed</div>
+          </div>
+
+          <div class="target-card">
+            <div class="target-header">
+              <span class="target-title">Merge Velocity Goal</span>
+              <span id="target-merge-status" class="target-badge">Goal: 80%</span>
+            </div>
+            <div class="target-value"><span id="target-merge-val">0%</span> <span class="target-goal">Merge Rate</span></div>
+            <div class="target-bar-wrap">
+              <div id="target-merge-bar" class="target-bar-fill fill-purple" style="width: 0%;"></div>
+            </div>
+            <div id="target-merge-sub" class="target-sub">0 merged of 0 total PRs</div>
+          </div>
+
+          <div class="target-card">
+            <div class="target-header">
+              <span class="target-title">Issue Resolution</span>
+              <span id="target-issue-status" class="target-badge">Goal: 85%</span>
+            </div>
+            <div class="target-value"><span id="target-issue-val">0%</span> <span class="target-goal">Resolved</span></div>
+            <div class="target-bar-wrap">
+              <div id="target-issue-bar" class="target-bar-fill fill-green" style="width: 0%;"></div>
+            </div>
+            <div id="target-issue-sub" class="target-sub">0 closed of 0 total issues</div>
+          </div>
+
+          <div class="target-card">
+            <div class="target-header">
+              <span class="target-title">Ecosystem Reach</span>
+              <span id="target-repo-status" class="target-badge">Goal: 10 Repos</span>
+            </div>
+            <div class="target-value"><span id="target-repo-val">0</span> <span class="target-goal">/ 10 Repos</span></div>
+            <div class="target-bar-wrap">
+              <div id="target-repo-bar" class="target-bar-fill fill-blue" style="width: 0%;"></div>
+            </div>
+            <div id="target-repo-sub" class="target-sub">0 distinct repositories</div>
+          </div>
+        </div>
+
+        <!-- GitHub-style Contribution Heatmap Calendar -->
+        <div class="analytics-card heatmap-card">
+          <div class="card-header-flex">
+            <div>
+              <h3 class="card-title">Contribution Activity Calendar</h3>
+              <p id="heatmap-sub" class="card-sub">Daily contributions across pull requests, issues, and discussions</p>
+            </div>
+            <div id="heatmap-year-pills" class="year-pills">
+              <!-- Dynamically populated year pills -->
+            </div>
+          </div>
+
+          <div class="heatmap-scroll-wrap">
+            <div class="heatmap-calendar" id="heatmap-calendar">
+              <!-- SVG heatmap will be dynamically rendered here -->
+            </div>
+          </div>
+
+          <div class="heatmap-footer">
+            <div class="heatmap-count-label" id="heatmap-count-label">0 contributions in selected period</div>
+            <div class="heatmap-legend">
+              <span>Less</span>
+              <span class="legend-cell lvl-0"></span>
+              <span class="legend-cell lvl-1"></span>
+              <span class="legend-cell lvl-2"></span>
+              <span class="legend-cell lvl-3"></span>
+              <span class="legend-cell lvl-4"></span>
+              <span>More</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="charts-grid">
+          <!-- Chart 1: PR Health & Status Donut -->
+          <div class="analytics-card">
+            <div class="card-header">
+              <h3 class="card-title">Pull Request Health & Distribution</h3>
+              <p class="card-sub">Ratio of merged, open, closed, and draft pull requests</p>
+            </div>
+            <div class="donut-chart-wrap">
+              <div id="donut-svg-container" class="donut-svg-container">
+                <!-- SVG Donut Chart rendered here -->
+              </div>
+              <div id="donut-legend" class="donut-legend">
+                <!-- Legend items with exact counts & % -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 2: Top Repositories Breakdown -->
+          <div class="analytics-card">
+            <div class="card-header">
+              <h3 class="card-title">Top Repositories by Contribution</h3>
+              <p class="card-sub">Projects with the highest volume of activity</p>
+            </div>
+            <div id="top-repos-list" class="top-repos-list">
+              <!-- Dynamic horizontal progress bars -->
+            </div>
+          </div>
+
+          <!-- Chart 3: Year-over-Year Output Comparison -->
+          <div class="analytics-card">
+            <div class="card-header">
+              <h3 class="card-title">Year-over-Year Performance</h3>
+              <p class="card-sub">Annual contribution velocity and output volume</p>
+            </div>
+            <div id="yearly-chart-container" class="bar-chart-container">
+              <!-- Yearly SVG bar chart -->
+            </div>
+          </div>
+
+          <!-- Chart 4: Monthly Activity Breakdown -->
+          <div class="analytics-card">
+            <div class="card-header">
+              <h3 class="card-title">Monthly Trajectory</h3>
+              <p class="card-sub">Seasonal activity distribution (Jan – Dec)</p>
+            </div>
+            <div id="monthly-chart-container" class="bar-chart-container">
+              <!-- Monthly SVG bar chart -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SECTION: WORK FEED VIEW (Paging & List) ─────────────── -->
+      <section id="feed-view" class="feed-view">
+        <!-- Controls Bar -->
+        <div class="controls-bar">
         <!-- Filters Row -->
         <div class="filters-group">
           <!-- Filter 1: Item Kind -->
@@ -210,7 +383,8 @@
         <div id="page-buttons" class="page-numbers"></div>
         <div class="pager-summary" id="bottom-summary">Showing 50 items per page</div>
       </div>
-    </main>
+    </section>
+  </main>
 
     <!-- Footer -->
     <footer class="site-footer">

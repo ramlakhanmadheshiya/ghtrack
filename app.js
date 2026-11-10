@@ -62,11 +62,14 @@
     currentPage: 1,
     pageSize: PAGE_SIZE,
     totalEstimated: 0,
+    viewMode: "feed",       // 'feed' | 'analytics'
+    dateRange: "all",       // 'all' | '2026' | '2025' | '2024' | '90d' | '30d'
+    heatmapYear: "all",     // 'all' | year string
     filters: {
-      kind: "all",      // 'all' | 'pr' | 'issue' | 'comment'
-      prState: "all",   // 'all' | 'open' | 'draft' | 'merged' | 'closed'
-      repo: "all",      // 'all' | repoName
-      text: "",         // search query
+      kind: "all",          // 'all' | 'pr' | 'issue' | 'comment'
+      prState: "all",       // 'all' | 'open' | 'draft' | 'merged' | 'closed'
+      repo: "all",          // 'all' | repoName
+      text: "",             // search query
     },
     expandedPreviews: new Set(),
   };
@@ -81,6 +84,7 @@
 
     telemetryBar: document.getElementById("telemetry-bar"),
     statTotal: document.getElementById("stat-total"),
+    statTotalSub: document.getElementById("stat-total-sub"),
     statPrs: document.getElementById("stat-prs"),
     statPrsSub: document.getElementById("stat-prs-sub"),
     statIssues: document.getElementById("stat-issues"),
@@ -93,6 +97,41 @@
     streamProgressFill: document.getElementById("stream-progress-fill"),
 
     mainContent: document.getElementById("main-content"),
+    tabBtnFeed: document.getElementById("tab-btn-feed"),
+    tabBtnAnalytics: document.getElementById("tab-btn-analytics"),
+    feedView: document.getElementById("feed-view"),
+    analyticsView: document.getElementById("analytics-view"),
+    dateRangeSelect: document.getElementById("date-range-select"),
+
+    // Targets
+    targetPrVal: document.getElementById("target-pr-val"),
+    targetPrBar: document.getElementById("target-pr-bar"),
+    targetPrSub: document.getElementById("target-pr-sub"),
+    targetPrStatus: document.getElementById("target-pr-status"),
+    targetMergeVal: document.getElementById("target-merge-val"),
+    targetMergeBar: document.getElementById("target-merge-bar"),
+    targetMergeSub: document.getElementById("target-merge-sub"),
+    targetMergeStatus: document.getElementById("target-merge-status"),
+    targetIssueVal: document.getElementById("target-issue-val"),
+    targetIssueBar: document.getElementById("target-issue-bar"),
+    targetIssueSub: document.getElementById("target-issue-sub"),
+    targetIssueStatus: document.getElementById("target-issue-status"),
+    targetRepoVal: document.getElementById("target-repo-val"),
+    targetRepoBar: document.getElementById("target-repo-bar"),
+    targetRepoSub: document.getElementById("target-repo-sub"),
+    targetRepoStatus: document.getElementById("target-repo-status"),
+
+    // Heatmap & Charts
+    heatmapCalendar: document.getElementById("heatmap-calendar"),
+    heatmapSub: document.getElementById("heatmap-sub"),
+    heatmapYearPills: document.getElementById("heatmap-year-pills"),
+    heatmapCountLabel: document.getElementById("heatmap-count-label"),
+    donutSvgContainer: document.getElementById("donut-svg-container"),
+    donutLegend: document.getElementById("donut-legend"),
+    topReposList: document.getElementById("top-repos-list"),
+    yearlyChartContainer: document.getElementById("yearly-chart-container"),
+    monthlyChartContainer: document.getElementById("monthly-chart-container"),
+
     filterKind: document.getElementById("filter-kind"),
     wrapPrState: document.getElementById("wrap-pr-state"),
     filterPrState: document.getElementById("filter-pr-state"),
@@ -113,17 +152,6 @@
     iconSun: document.getElementById("theme-icon-sun"),
     iconMoon: document.getElementById("theme-icon-moon"),
 
-    btnToken: document.getElementById("btn-token"),
-    tokenDot: document.getElementById("token-dot"),
-    tokenLabel: document.getElementById("token-label"),
-    modalToken: document.getElementById("modal-token"),
-    modalTokenClose: document.getElementById("modal-token-close"),
-    inputPat: document.getElementById("input-pat"),
-    btnTestToken: document.getElementById("btn-test-token"),
-    btnSaveToken: document.getElementById("btn-save-token"),
-    btnClearToken: document.getElementById("btn-clear-token"),
-    tokenTestResult: document.getElementById("token-test-result"),
-
     btnExport: document.getElementById("btn-export"),
     modalExport: document.getElementById("modal-export"),
     modalExportClose: document.getElementById("modal-export-close"),
@@ -134,7 +162,7 @@
     btnDownloadExport: document.getElementById("btn-download-export"),
   };
 
-  // ── GraphQL Queries ─────────────────────────────────────────────────
+  // ── GraphQL Queries (Optimized, Lightweight & Timeout-Proof) ────────
   const ROW_FRAGMENT = `
     fragment RowDetails on SearchResultItem {
       ... on Issue {
@@ -146,21 +174,10 @@
         stateReason
         createdAt
         updatedAt
-        body
         author { login avatarUrl }
         repository { nameWithOwner }
-        assignees(first: 5) { nodes { login } }
-        comments(last: 3) {
-          totalCount
-          nodes {
-            author { login avatarUrl }
-            createdAt
-            body
-          }
-        }
-        labels(first: 6) {
-          nodes { name color }
-        }
+        comments { totalCount }
+        labels(first: 5) { nodes { name color } }
       }
       ... on PullRequest {
         __typename
@@ -170,31 +187,14 @@
         state
         isDraft
         merged
-        mergeable
-        reviewDecision
         createdAt
         updatedAt
-        body
         additions
         deletions
         changedFiles
-        baseRefName
-        headRefName
         author { login avatarUrl }
         repository { nameWithOwner }
-        assignees(first: 5) { nodes { login } }
-        comments(last: 3) {
-          totalCount
-          nodes {
-            author { login avatarUrl }
-            createdAt
-            body
-          }
-        }
-        reviews(last: 5) {
-          totalCount
-          nodes { state author { login } submittedAt }
-        }
+        comments { totalCount }
         commits(last: 1) {
           nodes {
             commit {
@@ -202,21 +202,14 @@
             }
           }
         }
-        labels(first: 6) {
-          nodes { name color }
-        }
+        labels(first: 5) { nodes { name color } }
       }
     }
   `;
 
   const SEARCH_QUERY = `
-    query($main: String!, $extra: String!, $n: Int!, $cursorMain: String, $cursorExtra: String) {
-      main: search(query: $main, type: ISSUE, first: $n, after: $cursorMain) {
-        issueCount
-        pageInfo { endCursor hasNextPage }
-        nodes { ...RowDetails }
-      }
-      extra: search(query: $extra, type: ISSUE, first: $n, after: $cursorExtra) {
+    query($q: String!, $n: Int!, $cursor: String) {
+      search(query: $q, type: ISSUE, first: $n, after: $cursor) {
         issueCount
         pageInfo { endCursor hasNextPage }
         nodes { ...RowDetails }
@@ -266,11 +259,11 @@
     throw new Error("GRAPHQL_UNAVAILABLE");
   }
 
-  // REST search fallback for unauthenticated public browsing (zero token needed)
+  // REST search fallback for unauthenticated public browsing
   async function fetchRestSearch(login, page = 1) {
     const headers = {
       "User-Agent": "ghtrack-web/1.0",
-      "Accept": "application/vnd.github.v3+json",
+      Accept: "application/vnd.github.v3+json",
     };
     if (state.token) {
       headers["Authorization"] = `Bearer ${state.token}`;
@@ -283,7 +276,7 @@
     if (!res.ok) {
       const msg = data?.message || `GitHub error: ${res.status}`;
       if (res.status === 403) {
-        throw new Error("GitHub rate limit reached for unauthenticated browsing. Enter a free token via Settings for 5,000 req/hr!");
+        throw new Error("GitHub rate limit reached for unauthenticated browsing.");
       }
       throw new Error(msg);
     }
@@ -366,23 +359,7 @@
     const authorLogin = node.author?.login || "ghost";
     const isAuthor = authorLogin.toLowerCase() === currentLogin.toLowerCase();
 
-    // Check if user commented
-    let userCommented = false;
-    let lastCommentText = "";
-    let lastCommentAuthor = "";
-    let lastCommentTime = "";
-
-    const commentNodes = node.comments?.nodes || [];
-    for (const c of commentNodes) {
-      if (c?.author?.login?.toLowerCase() === currentLogin.toLowerCase()) {
-        userCommented = true;
-      }
-      if (c) {
-        lastCommentText = c.body || "";
-        lastCommentAuthor = c.author?.login || "someone";
-        lastCommentTime = c.createdAt || "";
-      }
-    }
+    let userCommented = !isAuthor;
 
     // Determine status badge
     let status = "open";
@@ -424,7 +401,7 @@
       id: node.url,
       kind: isPR ? "pr" : "issue",
       number: node.number,
-      title: node.title.trim(),
+      title: (node.title || "").trim(),
       url: node.url,
       repo: node.repository.nameWithOwner,
       author: authorLogin,
@@ -435,17 +412,17 @@
       updatedAt: node.updatedAt,
       status,
       statusLabel,
-      body: node.body || "",
+      body: "",
       additions: node.additions || 0,
       deletions: node.deletions || 0,
       changedFiles: node.changedFiles || 0,
-      baseRef: node.baseRefName || "",
-      headRef: node.headRefName || "",
-      isConflict: node.mergeable === "CONFLICTING",
-      reviewDecision: node.reviewDecision || null,
+      baseRef: "",
+      headRef: "",
+      isConflict: false,
+      reviewDecision: null,
       ciState,
       commentsCount: node.comments?.totalCount || 0,
-      recentComments: commentNodes,
+      recentComments: [],
       labels: node.labels?.nodes || [],
     };
   }
@@ -470,6 +447,33 @@
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // ── Date Filtering Helper ───────────────────────────────────────────
+  function getItemsForCurrentDateRange() {
+    const all = Array.from(state.itemsMap.values());
+    if (state.dateRange === "all") return all;
+
+    const now = Date.now();
+    if (state.dateRange === "30d") {
+      const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+      return all.filter((i) => new Date(i.createdAt).getTime() >= cutoff || new Date(i.updatedAt).getTime() >= cutoff);
+    }
+    if (state.dateRange === "90d") {
+      const cutoff = now - 90 * 24 * 60 * 60 * 1000;
+      return all.filter((i) => new Date(i.createdAt).getTime() >= cutoff || new Date(i.updatedAt).getTime() >= cutoff);
+    }
+
+    const targetYear = parseInt(state.dateRange, 10);
+    if (!isNaN(targetYear)) {
+      return all.filter((i) => {
+        const cy = new Date(i.createdAt).getFullYear();
+        const uy = new Date(i.updatedAt).getFullYear();
+        return cy === targetYear || uy === targetYear;
+      });
+    }
+
+    return all;
   }
 
   // ── Fetch & Background Stream Engine ────────────────────────────────
@@ -522,24 +526,23 @@
       updateTelemetry();
       populateRepoFilter();
       renderList();
+      renderAnalytics();
     }
 
     try {
-      // 1. Try High-Speed GraphQL (100 items per request, 5,000 req/hr enabled)
+      // 1. High-Speed GraphQL (50 items per batch, timeout-proof, 5,000 req/hr enabled)
       const data = await fetchGraphQL(SEARCH_QUERY, {
-        main: `involves:${cleanUser} sort:updated-desc`,
-        extra: `commenter:${cleanUser} sort:updated-desc`,
-        n: 100,
-        cursorMain: null,
-        cursorExtra: null,
+        q: `involves:${cleanUser} sort:updated-desc`,
+        n: PAGE_SIZE,
+        cursor: null,
       });
 
       if (searchId !== activeSearchId) return;
 
-      const totalEstimated = Math.max(data.main?.issueCount || 0, data.extra?.issueCount || 0);
+      const totalEstimated = data.search?.issueCount || 0;
       state.totalEstimated = totalEstimated;
 
-      for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
+      for (const node of data.search?.nodes || []) {
         const item = normalizeNode(node, cleanUser);
         if (item) state.itemsMap.set(item.id, item);
       }
@@ -548,17 +551,15 @@
       updateTelemetry();
       populateRepoFilter();
       renderList();
+      renderAnalytics();
 
-      const hasMore = Boolean(data.main?.pageInfo?.hasNextPage || data.extra?.pageInfo?.hasNextPage);
-      if (hasMore) {
+      const hasMore = Boolean(data.search?.pageInfo?.hasNextPage);
+      if (hasMore || totalEstimated > state.itemsMap.size) {
         state.cancelStreaming = false;
         streamRemainingBatches(
           cleanUser,
           searchId,
-          data.main?.pageInfo?.endCursor,
-          data.extra?.pageInfo?.endCursor,
-          Boolean(data.main?.pageInfo?.hasNextPage),
-          Boolean(data.extra?.pageInfo?.hasNextPage),
+          data.search?.pageInfo?.endCursor,
           totalEstimated
         );
       } else {
@@ -569,7 +570,7 @@
     } catch {
       if (searchId !== activeSearchId) return;
 
-      // Fallback: If GraphQL failed, try REST Search
+      // Fallback: If GraphQL proxy unavailable, try REST Search
       try {
         const restData = await fetchRestSearch(cleanUser, 1);
         if (searchId !== activeSearchId) return;
@@ -586,6 +587,7 @@
         updateTelemetry();
         populateRepoFilter();
         renderList();
+        renderAnalytics();
 
         const totalPages = Math.ceil(totalEstimated / PAGE_SIZE);
         if (totalPages > 1) {
@@ -613,48 +615,84 @@
     }
   }
 
-  // Background stream processor: fetches in 100-item batches until done
-  async function streamRemainingBatches(login, searchId, cursorMain, cursorExtra, hasMain, hasExtra, totalEst) {
+  // Background stream processor: fetches in 50-item batches with windowing beyond 1,000 items
+  async function streamRemainingBatches(login, searchId, initialCursor, totalEst) {
     state.isStreamingBackground = true;
-    let cMain = cursorMain;
-    let cExtra = cursorExtra;
-    let moreMain = hasMain;
-    let moreExtra = hasExtra;
+    let cursor = initialCursor;
+    let currentQuery = `involves:${login} sort:updated-desc`;
+    let windowBatch = 0;
 
-    while ((moreMain || moreExtra) && !state.cancelStreaming && searchId === activeSearchId) {
+    while (!state.cancelStreaming && searchId === activeSearchId) {
       const currentCount = state.itemsMap.size;
-      const progressPercent = totalEst > 0 ? Math.min(98, Math.round((currentCount / totalEst) * 100)) : 50;
+      const progressPercent = totalEst > 0 ? Math.min(99, Math.round((currentCount / totalEst) * 100)) : 50;
 
       dom.streamText.textContent = `⚡ Buffering lifetime history: ${currentCount} loaded (${progressPercent}%)...`;
       dom.streamProgressFill.style.width = `${progressPercent}%`;
 
       try {
         const data = await fetchGraphQL(SEARCH_QUERY, {
-          main: `involves:${login} sort:updated-desc`,
-          extra: `commenter:${login} sort:updated-desc`,
-          n: 100,
-          cursorMain: moreMain ? cMain : null,
-          cursorExtra: moreExtra ? cExtra : null,
+          q: currentQuery,
+          n: PAGE_SIZE,
+          cursor,
         });
 
         if (searchId !== activeSearchId) return;
 
-        for (const node of [...(data.main?.nodes || []), ...(data.extra?.nodes || [])]) {
+        const nodes = data.search?.nodes || [];
+        if (!nodes.length) {
+          // If no nodes returned on current cursor/query, check if we need windowing
+          if (totalEst > state.itemsMap.size) {
+            let oldestDate = null;
+            for (const it of state.itemsMap.values()) {
+              if (!oldestDate || new Date(it.updatedAt) < new Date(oldestDate)) {
+                oldestDate = it.updatedAt;
+              }
+            }
+            if (oldestDate && windowBatch < 10) {
+              windowBatch++;
+              currentQuery = `involves:${login} updated:<${oldestDate} sort:updated-desc`;
+              cursor = null;
+              continue;
+            }
+          }
+          break;
+        }
+
+        for (const node of nodes) {
           const item = normalizeNode(node, login);
           if (item) state.itemsMap.set(item.id, item);
         }
 
-        moreMain = Boolean(data.main?.pageInfo?.hasNextPage);
-        moreExtra = Boolean(data.extra?.pageInfo?.hasNextPage);
-        cMain = data.main?.pageInfo?.endCursor || null;
-        cExtra = data.extra?.pageInfo?.endCursor || null;
+        const hasNextPage = Boolean(data.search?.pageInfo?.hasNextPage);
+        cursor = data.search?.pageInfo?.endCursor || null;
 
         updateTelemetry();
         populateRepoFilter();
         updatePagerUI();
+        renderAnalytics();
 
-        // Brief delay between batches
-        await new Promise((r) => setTimeout(r, 120));
+        // Check if single-query search ceiling reached (GitHub caps single queries at 1,000 items)
+        if (!hasNextPage || cursor === "Y3Vyc29yOjEwMDA=") {
+          if (totalEst > state.itemsMap.size) {
+            let oldestDate = null;
+            for (const it of state.itemsMap.values()) {
+              if (!oldestDate || new Date(it.updatedAt) < new Date(oldestDate)) {
+                oldestDate = it.updatedAt;
+              }
+            }
+            if (oldestDate && windowBatch < 10) {
+              windowBatch++;
+              currentQuery = `involves:${login} updated:<${oldestDate} sort:updated-desc`;
+              cursor = null;
+              await new Promise((r) => setTimeout(r, 60));
+              continue;
+            }
+          }
+          break;
+        }
+
+        // Delay between batches to respect rate limits
+        await new Promise((r) => setTimeout(r, 60));
       } catch (err) {
         console.warn("Background stream pause/error:", err.message);
         break;
@@ -669,6 +707,7 @@
 
     saveCachedProfile(login, { login: login.toLowerCase(), items: Array.from(state.itemsMap.values()) });
     updatePagerUI();
+    renderAnalytics();
   }
 
   // Background stream processor for public REST mode
@@ -677,7 +716,7 @@
 
     for (let page = 2; page <= totalPages && !state.cancelStreaming && searchId === activeSearchId; page++) {
       const currentCount = state.itemsMap.size;
-      const progressPercent = totalEst > 0 ? Math.min(98, Math.round((currentCount / totalEst) * 100)) : 50;
+      const progressPercent = totalEst > 0 ? Math.min(99, Math.round((currentCount / totalEst) * 100)) : 50;
 
       dom.streamText.textContent = `⚡ Buffering background history: ${currentCount} loaded (${progressPercent}%)...`;
       dom.streamProgressFill.style.width = `${progressPercent}%`;
@@ -694,8 +733,9 @@
         updateTelemetry();
         populateRepoFilter();
         updatePagerUI();
+        renderAnalytics();
 
-        await new Promise((r) => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, 200));
       } catch (err) {
         console.warn("Background REST stream paused:", err.message);
         break;
@@ -709,11 +749,12 @@
     dom.streamProgressFill.style.width = "100%";
     saveCachedProfile(login, { login: login.toLowerCase(), items: Array.from(state.itemsMap.values()) });
     updatePagerUI();
+    renderAnalytics();
   }
 
   // ── Telemetry & Metrics ─────────────────────────────────────────────
   function updateTelemetry() {
-    const all = Array.from(state.itemsMap.values());
+    const all = getItemsForCurrentDateRange();
     const prs = all.filter((i) => i.kind === "pr");
     const mergedPrs = prs.filter((i) => i.status === "merged");
     const issues = all.filter((i) => i.kind === "issue");
@@ -724,6 +765,7 @@
     const mergeRate = prs.length ? Math.round((mergedPrs.length / prs.length) * 100) : 0;
 
     dom.statTotal.textContent = all.length;
+    dom.statTotalSub.textContent = state.dateRange === "all" ? "PRs + Issues + Comments" : `in selected ${state.dateRange}`;
     dom.statPrs.textContent = prs.length;
     dom.statPrsSub.textContent = `${mergeRate}% merged (${mergedPrs.length} PRs)`;
     dom.statIssues.textContent = issues.length;
@@ -734,7 +776,7 @@
 
   // ── Filter & Pagination Engine ──────────────────────────────────────
   function getFilteredItems() {
-    let items = Array.from(state.itemsMap.values());
+    let items = getItemsForCurrentDateRange();
 
     // Filter 1: Kind (All / PR / Issue / Comment)
     if (state.filters.kind === "pr") {
@@ -771,7 +813,7 @@
   }
 
   function populateRepoFilter() {
-    const all = Array.from(state.itemsMap.values());
+    const all = getItemsForCurrentDateRange();
     const counts = {};
     for (const item of all) {
       counts[item.repo] = (counts[item.repo] || 0) + 1;
@@ -840,7 +882,7 @@
     const start = (state.currentPage - 1) * state.pageSize + 1;
     const end = Math.min(state.currentPage * state.pageSize, total);
 
-    // Gmail-style pager text: "1–50 of 717"
+    // Gmail-style pager text: "1–50 of 1000"
     dom.pagerCount.textContent = `${start}–${end} of ${total}`;
     dom.pagerPrev.disabled = state.currentPage <= 1;
     dom.pagerNext.disabled = state.currentPage >= totalPages;
@@ -898,7 +940,6 @@
     row.className = "item-row";
     row.dataset.id = item.id;
 
-    // Official status badges (Merged, Open, Closed, Draft)
     const badgeClass = item.status;
     const isExpanded = state.expandedPreviews.has(item.id);
 
@@ -912,10 +953,7 @@
       ciHtml = `<span class="subline-tag ci-tag pending" title="CI Running">◐ CI</span>`;
     }
 
-    // Conflict
-    const conflictHtml = item.isConflict ? `<span class="subline-tag conflict-tag">! Conflict</span>` : "";
-
-    // Type icon (PR vs Issue vs Comment)
+    // Type icon (PR vs Issue)
     let typeIconSvg = "";
     if (item.kind === "pr") {
       typeIconSvg = `<svg class="type-icon" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.128a2.251 2.251 0 101.5 0V5a2.5 2.5 0 00-2.5-2.5z"></path></svg>`;
@@ -938,7 +976,6 @@
               <span>·</span>
               <span>💬 ${item.commentsCount}</span>
               ${ciHtml}
-              ${conflictHtml}
               ${item.userCommented ? `<span class="subline-tag" style="color:var(--gh-warn);">★ Commented</span>` : ""}
             </div>
           </div>
@@ -1009,6 +1046,457 @@
 
     return row;
   }
+
+  // ── VISUAL ANALYTICS SUITE ──────────────────────────────────────────
+  function renderAnalytics() {
+    const items = getItemsForCurrentDateRange();
+    updateTargets(items);
+    renderHeatmap(items);
+    renderDonutChart(items);
+    renderTopRepos(items);
+    renderYearlyChart(items);
+    renderMonthlyChart(items);
+  }
+
+  // 1. Target Tracking Cards (Dynamic Milestones)
+  function updateTargets(items) {
+    const prs = items.filter((i) => i.kind === "pr");
+    const mergedPrs = prs.filter((i) => i.status === "merged");
+    const issues = items.filter((i) => i.kind === "issue");
+    const closedIssues = issues.filter((i) => i.status === "closed" || i.status === "not-planned");
+    const repos = new Set(items.map((i) => i.repo));
+
+    // Dynamic PR Milestone Target
+    let prMilestone = 50;
+    if (prs.length >= 50 && prs.length < 100) prMilestone = 100;
+    else if (prs.length >= 100 && prs.length < 250) prMilestone = 250;
+    else if (prs.length >= 250 && prs.length < 500) prMilestone = 500;
+    else if (prs.length >= 500 && prs.length < 1000) prMilestone = 1000;
+    else if (prs.length >= 1000) prMilestone = Math.ceil(prs.length / 500) * 500;
+
+    const prPct = prMilestone > 0 ? Math.min(100, Math.round((prs.length / prMilestone) * 100)) : 0;
+    dom.targetPrVal.textContent = prs.length;
+    dom.targetPrBar.style.width = `${prPct}%`;
+    dom.targetPrSub.textContent = `${prs.length} / ${prMilestone} PRs (${prPct}% of milestone)`;
+    if (prPct >= 100) {
+      dom.targetPrStatus.textContent = "Achieved";
+      dom.targetPrStatus.className = "target-badge achieved";
+    } else {
+      dom.targetPrStatus.textContent = "On Track";
+      dom.targetPrStatus.className = "target-badge";
+    }
+
+    // Dynamic Merge Velocity Goal
+    const mergeRate = prs.length ? Math.round((mergedPrs.length / prs.length) * 100) : 0;
+    const mergeGoal = 80;
+    const mergeBarPct = Math.min(100, Math.round((mergeRate / mergeGoal) * 100));
+    dom.targetMergeVal.textContent = `${mergeRate}%`;
+    dom.targetMergeBar.style.width = `${mergeBarPct}%`;
+    dom.targetMergeSub.textContent = `${mergedPrs.length} merged of ${prs.length} total PRs`;
+    if (mergeRate >= mergeGoal) {
+      dom.targetMergeStatus.textContent = "Goal Exceeded";
+      dom.targetMergeStatus.className = "target-badge achieved";
+    } else {
+      dom.targetMergeStatus.textContent = `Goal: ${mergeGoal}%`;
+      dom.targetMergeStatus.className = "target-badge";
+    }
+
+    // Dynamic Issue Resolution
+    const resRate = issues.length ? Math.round((closedIssues.length / issues.length) * 100) : 0;
+    const resGoal = 85;
+    const resBarPct = Math.min(100, Math.round((resRate / resGoal) * 100));
+    dom.targetIssueVal.textContent = `${resRate}%`;
+    dom.targetIssueBar.style.width = `${resBarPct}%`;
+    dom.targetIssueSub.textContent = `${closedIssues.length} closed of ${issues.length} total issues`;
+    if (resRate >= resGoal) {
+      dom.targetIssueStatus.textContent = "Optimal";
+      dom.targetIssueStatus.className = "target-badge achieved";
+    } else {
+      dom.targetIssueStatus.textContent = `Goal: ${resGoal}%`;
+      dom.targetIssueStatus.className = "target-badge";
+    }
+
+    // Dynamic Ecosystem Reach
+    let repoGoal = 10;
+    if (repos.size >= 10 && repos.size < 25) repoGoal = 25;
+    else if (repos.size >= 25 && repos.size < 50) repoGoal = 50;
+    else if (repos.size >= 50) repoGoal = Math.ceil(repos.size / 25) * 25;
+
+    const repoBarPct = Math.min(100, Math.round((repos.size / repoGoal) * 100));
+    dom.targetRepoVal.textContent = repos.size;
+    dom.targetRepoBar.style.width = `${repoBarPct}%`;
+    dom.targetRepoSub.textContent = `${repos.size} distinct repositories`;
+    if (repos.size >= repoGoal) {
+      dom.targetRepoStatus.textContent = "Achieved";
+      dom.targetRepoStatus.className = "target-badge achieved";
+    } else {
+      dom.targetRepoStatus.textContent = `Goal: ${repoGoal} Repos`;
+      dom.targetRepoStatus.className = "target-badge";
+    }
+  }
+
+  // 2. GitHub-style Contribution Heatmap Calendar
+  function renderHeatmap(items) {
+    if (!dom.heatmapCalendar) return;
+
+    // Daily contribution count map
+    const dayCounts = new Map();
+    const yearsFound = new Set();
+
+    for (const item of items) {
+      const d = item.createdAt ? item.createdAt.split("T")[0] : null;
+      if (d) {
+        dayCounts.set(d, (dayCounts.get(d) || 0) + 1);
+        const y = new Date(d).getFullYear();
+        if (!isNaN(y)) yearsFound.add(y);
+      }
+    }
+
+    // Populate Year Pills
+    const sortedYears = Array.from(yearsFound).sort((a, b) => b - a);
+    dom.heatmapYearPills.innerHTML = "";
+
+    const addPill = (yearVal, label) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `year-pill ${state.heatmapYear === String(yearVal) ? "active" : ""}`;
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        state.heatmapYear = String(yearVal);
+        renderHeatmap(items);
+      });
+      dom.heatmapYearPills.appendChild(btn);
+    };
+
+    addPill("all", "52 Weeks");
+    for (const y of sortedYears) {
+      addPill(y, String(y));
+    }
+
+    // Determine calendar date bounds
+    const now = new Date();
+    let startDate = new Date();
+    let totalDays = 371; // 53 weeks * 7 days
+
+    if (state.heatmapYear === "all") {
+      startDate.setDate(now.getDate() - 364);
+      // Align to Sunday
+      const dayOfWeek = startDate.getDay();
+      startDate.setDate(startDate.getDate() - dayOfWeek);
+    } else {
+      const selectedYear = parseInt(state.heatmapYear, 10);
+      startDate = new Date(selectedYear, 0, 1);
+      const dayOfWeek = startDate.getDay();
+      startDate.setDate(startDate.getDate() - dayOfWeek);
+    }
+
+    // Build SVG Calendar
+    const cols = 53;
+    const rows = 7;
+    const cellSize = 10;
+    const cellGap = 3;
+    const stride = cellSize + cellGap;
+    const offsetX = 32;
+    const offsetY = 20;
+
+    let totalCalendarCount = 0;
+    let rectsSvg = "";
+    let monthLabelsSvg = "";
+    let lastMonth = -1;
+
+    const curr = new Date(startDate);
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const isoDate = curr.toISOString().split("T")[0];
+        const count = dayCounts.get(isoDate) || 0;
+        totalCalendarCount += count;
+
+        let lvl = 0;
+        if (count >= 10) lvl = 4;
+        else if (count >= 6) lvl = 3;
+        else if (count >= 3) lvl = 2;
+        else if (count >= 1) lvl = 1;
+
+        const x = offsetX + c * stride;
+        const y = offsetY + r * stride;
+
+        // Month label at week transition
+        if (r === 0 && curr.getMonth() !== lastMonth) {
+          lastMonth = curr.getMonth();
+          monthLabelsSvg += `<text x="${x}" y="12" class="heatmap-month-label">${monthNames[lastMonth]}</text>`;
+        }
+
+        const dateStr = curr.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const label = `${count} contribution${count === 1 ? "" : "s"} on ${dateStr}`;
+
+        rectsSvg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="2" class="lvl-${lvl}"><title>${label}</title></rect>`;
+
+        curr.setDate(curr.getDate() + 1);
+      }
+    }
+
+    const svgWidth = offsetX + cols * stride + 10;
+    const svgHeight = offsetY + rows * stride + 10;
+
+    dom.heatmapCalendar.innerHTML = `
+      <svg viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}">
+        ${monthLabelsSvg}
+        <text x="6" y="${offsetY + 1 * stride + 8}" class="heatmap-day-label">Mon</text>
+        <text x="6" y="${offsetY + 3 * stride + 8}" class="heatmap-day-label">Wed</text>
+        <text x="6" y="${offsetY + 5 * stride + 8}" class="heatmap-day-label">Fri</text>
+        ${rectsSvg}
+      </svg>
+    `;
+
+    const periodLabel = state.heatmapYear === "all" ? "last 52 weeks" : `year ${state.heatmapYear}`;
+    dom.heatmapCountLabel.textContent = `${totalCalendarCount} contribution${totalCalendarCount === 1 ? "" : "s"} in ${periodLabel}`;
+  }
+
+  // 3. Pull Request Health & Distribution Donut Chart
+  function renderDonutChart(items) {
+    if (!dom.donutSvgContainer || !dom.donutLegend) return;
+
+    const prs = items.filter((i) => i.kind === "pr");
+    const merged = prs.filter((i) => i.status === "merged").length;
+    const open = prs.filter((i) => i.status === "open").length;
+    const closed = prs.filter((i) => i.status === "closed").length;
+    const draft = prs.filter((i) => i.status === "draft").length;
+    const totalPrs = prs.length;
+
+    const mergeRate = totalPrs ? Math.round((merged / totalPrs) * 100) : 0;
+
+    const slices = [
+      { key: "merged", label: "Merged", count: merged, color: "#a371f7" },
+      { key: "open", label: "Open", count: open, color: "#3fb950" },
+      { key: "closed", label: "Closed", count: closed, color: "#f85149" },
+      { key: "draft", label: "Draft", count: draft, color: "#8b949e" },
+    ];
+
+    const radius = 54;
+    const circumference = 2 * Math.PI * radius; // ~339.29
+
+    let accumulatedPct = 0;
+    let pathsSvg = "";
+
+    if (totalPrs === 0) {
+      // Empty placeholder ring
+      pathsSvg = `<circle cx="80" cy="80" r="${radius}" fill="none" stroke="var(--canvas-subtle)" stroke-width="18" />`;
+    } else {
+      for (const slice of slices) {
+        if (slice.count === 0) continue;
+        const pct = slice.count / totalPrs;
+        const dashLen = pct * circumference;
+        const spaceLen = circumference - dashLen;
+        const offset = -accumulatedPct * circumference;
+
+        pathsSvg += `
+          <circle
+            cx="80" cy="80" r="${radius}"
+            fill="none"
+            stroke="${slice.color}"
+            stroke-width="18"
+            stroke-dasharray="${dashLen.toFixed(2)} ${spaceLen.toFixed(2)}"
+            stroke-dashoffset="${offset.toFixed(2)}"
+            transform="rotate(-90 80 80)"
+          >
+            <title>${slice.label}: ${slice.count} (${Math.round(pct * 100)}%)</title>
+          </circle>
+        `;
+        accumulatedPct += pct;
+      }
+    }
+
+    dom.donutSvgContainer.innerHTML = `
+      <svg viewBox="0 0 160 160" width="160" height="160">
+        ${pathsSvg}
+        <text x="80" y="78" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-white)" font-family="var(--font-mono)">${mergeRate}%</text>
+        <text x="80" y="96" text-anchor="middle" font-size="11" fill="var(--text-faint)" font-family="var(--font-mono)">Merged</text>
+      </svg>
+    `;
+
+    // Legend items
+    dom.donutLegend.innerHTML = slices
+      .map((s) => {
+        const pct = totalPrs ? Math.round((s.count / totalPrs) * 100) : 0;
+        return `
+          <div class="donut-legend-row">
+            <div class="donut-legend-label">
+              <span class="legend-color-dot" style="background:${s.color};"></span>
+              <span>${s.label}</span>
+            </div>
+            <span class="donut-legend-val">${s.count} <span style="opacity:0.6;">(${pct}%)</span></span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // 4. Top Repositories Breakdown (Horizontal Bars)
+  function renderTopRepos(items) {
+    if (!dom.topReposList) return;
+
+    const counts = new Map();
+    for (const item of items) {
+      counts.set(item.repo, (counts.get(item.repo) || 0) + 1);
+    }
+
+    const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const maxVal = sorted.length ? sorted[0][1] : 1;
+    const total = items.length || 1;
+
+    if (!sorted.length) {
+      dom.topReposList.innerHTML = `<p style="font-size:0.8rem;color:var(--text-faint);">No repository data available.</p>`;
+      return;
+    }
+
+    dom.topReposList.innerHTML = sorted
+      .map(([repo, count]) => {
+        const barPct = Math.round((count / maxVal) * 100);
+        const overallPct = Math.round((count / total) * 100);
+        return `
+          <div class="top-repo-row" data-repo="${escapeHtml(repo)}" style="cursor:pointer;" title="Click to filter by ${escapeHtml(repo)}">
+            <div class="top-repo-meta">
+              <span class="top-repo-name">${escapeHtml(repo)}</span>
+              <span class="top-repo-count">${count} <span style="opacity:0.6;">(${overallPct}%)</span></span>
+            </div>
+            <div class="top-repo-bar-wrap">
+              <div class="top-repo-bar-fill" style="width: ${barPct}%;"></div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    // Clicking a repo row filters the list and switches to Work Feed
+    dom.topReposList.querySelectorAll(".top-repo-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const repo = row.dataset.repo;
+        dom.filterRepo.value = repo;
+        state.filters.repo = repo;
+        state.currentPage = 1;
+        state.viewMode = "feed";
+        dom.tabBtnFeed.classList.add("active");
+        dom.tabBtnAnalytics.classList.remove("active");
+        dom.feedView.style.display = "block";
+        dom.analyticsView.style.display = "none";
+        renderList();
+      });
+    });
+  }
+
+  // 5. Year-over-Year Performance (Bar Chart)
+  function renderYearlyChart(items) {
+    if (!dom.yearlyChartContainer) return;
+
+    // Use all items from state.itemsMap for year comparison
+    const allItems = Array.from(state.itemsMap.values());
+    const yearCounts = new Map();
+
+    for (const item of allItems) {
+      const y = item.createdAt ? new Date(item.createdAt).getFullYear() : null;
+      if (y && !isNaN(y)) {
+        yearCounts.set(y, (yearCounts.get(y) || 0) + 1);
+      }
+    }
+
+    const sortedYears = Array.from(yearCounts.keys()).sort((a, b) => a - b);
+    const maxVal = sortedYears.length ? Math.max(...sortedYears.map((y) => yearCounts.get(y))) : 1;
+
+    if (!sortedYears.length) {
+      dom.yearlyChartContainer.innerHTML = `<p style="font-size:0.8rem;color:var(--text-faint);">No yearly data available.</p>`;
+      return;
+    }
+
+    dom.yearlyChartContainer.innerHTML = sortedYears
+      .map((y) => {
+        const count = yearCounts.get(y);
+        const height = Math.max(6, Math.round((count / maxVal) * 125));
+        const isCurrentSelected = state.dateRange === String(y);
+        return `
+          <div class="chart-bar-col" data-year="${y}" style="cursor:pointer;" title="${count} contributions in ${y} (click to view)">
+            <span class="chart-bar-val">${count}</span>
+            <div class="chart-bar-body ${isCurrentSelected ? "peak-bar" : ""}" style="height:${height}px;"></div>
+            <span class="chart-bar-label">${y}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    dom.yearlyChartContainer.querySelectorAll(".chart-bar-col").forEach((col) => {
+      col.addEventListener("click", () => {
+        const y = col.dataset.year;
+        dom.dateRangeSelect.value = y;
+        state.dateRange = y;
+        state.currentPage = 1;
+        updateTelemetry();
+        populateRepoFilter();
+        renderList();
+        renderAnalytics();
+      });
+    });
+  }
+
+  // 6. Monthly Trajectory (Jan–Dec Bar Chart)
+  function renderMonthlyChart(items) {
+    if (!dom.monthlyChartContainer) return;
+
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthCounts = new Array(12).fill(0);
+
+    for (const item of items) {
+      if (item.createdAt) {
+        const m = new Date(item.createdAt).getMonth();
+        if (m >= 0 && m < 12) monthCounts[m]++;
+      }
+    }
+
+    const maxVal = Math.max(1, ...monthCounts);
+    const peakIndex = monthCounts.indexOf(maxVal);
+
+    dom.monthlyChartContainer.innerHTML = monthNames
+      .map((name, idx) => {
+        const count = monthCounts[idx];
+        const height = Math.max(6, Math.round((count / maxVal) * 125));
+        const isPeak = idx === peakIndex && count > 0;
+        return `
+          <div class="chart-bar-col" title="${count} contributions in ${name}">
+            <span class="chart-bar-val">${count}</span>
+            <div class="chart-bar-body ${isPeak ? "peak-bar" : ""}" style="height:${height}px;"></div>
+            <span class="chart-bar-label">${name}</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // ── View Mode & Date Filter Event Listeners ──────────────────────────
+  dom.tabBtnFeed.addEventListener("click", () => {
+    state.viewMode = "feed";
+    dom.tabBtnFeed.classList.add("active");
+    dom.tabBtnAnalytics.classList.remove("active");
+    dom.feedView.style.display = "block";
+    dom.analyticsView.style.display = "none";
+  });
+
+  dom.tabBtnAnalytics.addEventListener("click", () => {
+    state.viewMode = "analytics";
+    dom.tabBtnAnalytics.classList.add("active");
+    dom.tabBtnFeed.classList.remove("active");
+    dom.analyticsView.style.display = "block";
+    dom.feedView.style.display = "none";
+    renderAnalytics();
+  });
+
+  dom.dateRangeSelect.addEventListener("change", (e) => {
+    state.dateRange = e.target.value;
+    state.currentPage = 1;
+    updateTelemetry();
+    populateRepoFilter();
+    renderList();
+    renderAnalytics();
+  });
 
   // ── Filter Event Listeners ──────────────────────────────────────────
   dom.filterKind.addEventListener("change", (e) => {
@@ -1112,82 +1600,6 @@
     applyTheme(current === "light" ? "dark" : "light");
   });
 
-  // ── Token Management Modal ──────────────────────────────────────────
-  function updateTokenBadge() {
-    if (state.token) {
-      dom.tokenDot.classList.add("active");
-      dom.tokenLabel.textContent = "Token: Active (5k/hr)";
-    } else {
-      dom.tokenDot.classList.remove("active");
-      dom.tokenLabel.textContent = "Token: Public";
-    }
-  }
-
-  dom.btnToken.addEventListener("click", () => {
-    dom.inputPat.value = state.token;
-    dom.tokenTestResult.style.display = "none";
-    dom.modalToken.classList.add("open");
-    dom.inputPat.focus();
-  });
-
-  dom.modalTokenClose.addEventListener("click", () => {
-    dom.modalToken.classList.remove("open");
-  });
-
-  dom.btnSaveToken.addEventListener("click", () => {
-    const val = dom.inputPat.value.trim();
-    state.token = val;
-    if (val) {
-      localStorage.setItem("ghtrack_token", val);
-    } else {
-      localStorage.removeItem("ghtrack_token");
-    }
-    updateTokenBadge();
-    dom.modalToken.classList.remove("open");
-  });
-
-  dom.btnClearToken.addEventListener("click", () => {
-    state.token = "";
-    localStorage.removeItem("ghtrack_token");
-    dom.inputPat.value = "";
-    dom.tokenTestResult.style.display = "none";
-    updateTokenBadge();
-    dom.modalToken.classList.remove("open");
-  });
-
-  dom.btnTestToken.addEventListener("click", async () => {
-    const token = dom.inputPat.value.trim();
-    if (!token) {
-      dom.tokenTestResult.className = "token-test-result error";
-      dom.tokenTestResult.textContent = "Please enter a token first.";
-      dom.tokenTestResult.style.display = "block";
-      return;
-    }
-
-    dom.tokenTestResult.className = "token-test-result";
-    dom.tokenTestResult.textContent = "Testing token with GitHub API...";
-    dom.tokenTestResult.style.display = "block";
-
-    try {
-      const res = await fetch(`${GITHUB_REST_ENDPOINT}/rate_limit`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": "ghtrack-web/1.0",
-        },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-
-      const remaining = data.rate?.remaining ?? "N/A";
-      const limit = data.rate?.limit ?? 5000;
-      dom.tokenTestResult.className = "token-test-result success";
-      dom.tokenTestResult.textContent = `✓ Valid Token! ${remaining} of ${limit} requests remaining.`;
-    } catch (err) {
-      dom.tokenTestResult.className = "token-test-result error";
-      dom.tokenTestResult.textContent = `✕ Test Failed: ${err.message}`;
-    }
-  });
-
   // ── Export Modal ────────────────────────────────────────────────────
   dom.btnExport.addEventListener("click", () => {
     generateExportContent("md");
@@ -1235,8 +1647,7 @@
   dom.btnDownloadExport.addEventListener("click", () => {
     const isMd = dom.tabExportMd.classList.contains("active");
     const ext = isMd ? "md" : "json";
-    const type = isMd ? "text/markdown" : "application/json";
-    const blob = new Blob([dom.exportContent.value], { type });
+    const blob = new Blob([dom.exportContent.value], { type: isMd ? "text/markdown" : "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1247,23 +1658,19 @@
 
   // ── Keyboard Shortcuts ──────────────────────────────────────────────
   document.addEventListener("keydown", (e) => {
-    // Focus search on '/'
     if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
       e.preventDefault();
       dom.filterText.focus();
     }
-    // Close modals on Escape
     if (e.key === "Escape") {
-      dom.modalToken.classList.remove("open");
       dom.modalExport.classList.remove("open");
     }
   });
 
   // ── Initialization ──────────────────────────────────────────────────
   initTheme();
-  updateTokenBadge();
 
-  // URL Query handling: ?name=ramlakhanmadheshiya
+  // URL Query handling: ?name=shravanngoswamii
   const params = new URLSearchParams(window.location.search);
   const initialName = params.get("name") || params.get("u") || "";
   if (initialName) {
