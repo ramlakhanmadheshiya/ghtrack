@@ -152,6 +152,22 @@ The whole list is saved per person. Next visit renders it instantly, re-fetches 
 ### Request scheduler (`apiGet` / `pump`)
 Priorities: 0 first pages/previews, 1 catch-up + PR count, 2 merged/open counts, 3 background harvest. Waits silently for GitHub's reset; retries 5xx/timeouts; tracks the minimum remaining budget per window. Never request `html+json` on searches (huge queries time out).
 
+
+## Versions (private repo tags + GitHub Releases)
+- **v1.0** — no-token engine, original dark "terminal" UI, Kind/Status/Role/Repo native selects.
+- **v2.0** — full UI redesign: neutral design system (System/Light/Dark), custom searchable dropdowns,
+  time range switch (All time · 24h · 7d · 30d · 90d · 12 months · Year), redesigned list rows,
+  responsive analytics grid where every chart has a type switch (time charts: bar/line/area/cumulative/table;
+  breakdowns: donut/pie/bars/table), contribution calendar with its own year picker, highlight tiles.
+- Go back: `git checkout v1.0` then `./deploy.sh` (return with `git checkout main`).
+
+### v2 UI notes for future agents
+- Styles: `app.css` tokens at the top (light default; dark via `prefers-color-scheme` and `[data-theme]`).
+  Chart colours = dataviz reference palette (`--s1..--s8`), single hue `--bar` for magnitudes, GitHub state colours for status.
+- Charts: `CHARTS` spec map + `drawSeries` / `drawCat` in `app.js`; cards are `<article data-chart="id">` in `index.html`.
+  Chart type choice is remembered per viewer (localStorage `ghtrack_chart_<id>`).
+- Dropdowns: `createDropdown()` (keyboard + search). No native `<select>` anywhere.
+
 ## 6. Codebase File Structure
 
 ```
