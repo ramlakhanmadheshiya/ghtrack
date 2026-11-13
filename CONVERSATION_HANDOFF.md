@@ -184,6 +184,15 @@ new bar-chart logo, Refresh/Export removed (refresh happens automatically on eve
 time charts scroll horizontally instead of squeezing (hidden scrollbars, drag to pan,
 −/+/fit buttons, ⌘/Ctrl+wheel zoom, newest data shown first). Contact: hello@theramlakhan.com in footer.
 
+## v2.5 additions
+- **Latest activity per row**: open PRs get a review label from 3 searches (`author:U is:pr is:open review:changes_requested|approved|required`).
+  The 12 most recently updated open items they created/are assigned get their latest comment (`/issues/N/comments?per_page=1&page=<count>`)
+  and latest review (`/pulls/N/reviews`) via the core API; cached in the snapshot until `updatedAt` changes. Opening a preview also refreshes it.
+- **Counting**: comments on their own *issues* also count as a discussion (once per issue) via `author:U commenter:U is:issue`
+  (`state.selfCommented`, `hasRole()`). Comments on their own PRs do not count (user's choice: shepherding your PR isn't a discussion).
+- **Recent searches**: last 8 tracked profiles on the home page (localStorage `ghtrack_recent`), remove one or clear all.
+- Default time range is 30 days; time range filters by involvement date (`actAt`).
+
 ## 6. Codebase File Structure
 
 ```
