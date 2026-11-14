@@ -57,7 +57,7 @@
 - Small preview drawer: clicking "Preview" expands an inline viewer showing GitHub activity.
 
 ### Request 3: Testing & Debugging Initial Profiles
-- Target profile 1: `@shravanngoswamii` (heavy user with >1,250 lifetime contributions).
+- Target profile 1: `@ChrisRackauckas` (very large account).
 - Target profile 2: `@ramlakhanmadheshiya` (author of the app).
 - Identified rate limit considerations: unauthenticated GitHub REST search limits clients to 10 requests/minute.
 
@@ -102,7 +102,7 @@
 ## 4. Deep Forensic Analysis of Critical Bugs & Fixes
 
 ### Bug 1: Why 3 Different Numbers Occurred (1,233 vs. 599 vs. 1,119)
-The user observed 3 different lifetime totals for `@shravanngoswamii`:
+The user observed 3 different lifetime totals for a test account:
 1. **599 Items (Incognito / Clean Browser on GitHub Pages)**:
    - *Root Cause*: On static GitHub Pages, `/api/graphql` is unavailable. The code fell back to unauthenticated REST Search (`/search/issues`). GitHub imposes a strict unauthenticated limit of **10 requests per minute**. Around page 6 ($6 \times 100 \approx 599$ items), GitHub returned `HTTP 403 Forbidden Rate Limit Exceeded`.
    - *Bug in Code*: The catch block caught the 403, stopped the loop, and erroneously reported `✓ 100% lifetime history loaded (599 items)` and cached that incomplete 599 into IndexedDB.
@@ -208,7 +208,7 @@ deploy.sh    # publish to theramlakhan.com/ghtrack with content-hash cache busti
 | Account | Result |
 | :--- | :--- |
 | @ChrisRackauckas (48,286) | numbers in ~6s, list grows ~1,000/min, filters instant |
-| @shravanngoswamii (1,099) | numbers ~2s, full list in ~22s, revisit instant |
+| ~1,100-item account | numbers ~2s, full list in ~22s, revisit instant |
 | @ramlakhanmadheshiya (33) | everything in ~1–6s, revisit instant |
 | unknown user / organization | clear message, 1 request |
 
